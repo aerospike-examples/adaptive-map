@@ -35,6 +35,11 @@ public interface IAdaptiveMap {
 	 */
 	public void deleteAll(String recordKeyValue);
 	
+	/**
+	 * Remove a single record from the underlying map
+	 */
+	public Object delete(String recordKey, Object mapKey, byte[] mapKeyDigest);
+	
 	public void put(String recordKey, Object mapKey, byte[] mapKeyDigest, Value value);
 	public Set<Record> getAll(WritePolicy opPolicy, String keyValue, Operation ... operations);
 	public Set<Record> getAll(Policy readPolicy, String keyValue);

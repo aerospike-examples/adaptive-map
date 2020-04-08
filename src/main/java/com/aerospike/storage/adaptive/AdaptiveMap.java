@@ -586,6 +586,90 @@ public class AdaptiveMap implements IAdaptiveMap {
 		return records;
 	}
 
+	/**
+	 * Remove a single key from the Map and return the value which was removed or null if no object was removed.
+	 * <p>
+	 * Note that deleting records from an underlying map will never cause 2 sub-blocks to merge back together. Hence
+	 * removing a large number of records might result in a map with a lot of totally empty sub-blocks.
+	 * 
+	 * @param recordKeyValue
+	 * @param mapKey
+	 * @param operation
+	 * @return
+	 */
+	public Object delete(String recordKeyValue, Object mapKey, byte[] digest) {
+		Value mapKeyValue;
+		if (useDigestForMapKey || mapKey == null) {
+			mapKeyValue = Value.get(digest == null ? getHashFunction().getHash(mapKey) : digest);
+		}
+		else {
+			mapKeyValue = objectToValue(mapKey);
+		}
+		String id = getLockId();
+		Operation obtainLock = getObtainLockOperation(id, 0);
+		Operation removeFromMap = MapOperation.removeByKey(dataBinName, mapKeyValue, MapReturnType.VALUE);
+		Operation releaseLock = getReleaseLockOperation(id);
+		Operation getBlockMap = Operation.get(BLOCK_MAP_BIN);
+		Key key = getCombinedKey(recordKeyValue, 0);
+
+		try {
+			Record record = client.operate(null, key, obtainLock, removeFromMap, getBlockMap, releaseLock);
+			if (record == null) {
+				return null;
+			}
+			else {
+				return record.getValue(dataBinName);
+			}
+		}
+		catch (AerospikeException ae) {
+			if (ae.getResultCode() == ResultCode.ELEMENT_EXISTS) {
+				while (true) {
+					// Since we're removing an element, this can never cause the root block to split. 
+					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
+					if (record == null) {
+						// The lock vanished from under us, maybe it TTLd out, just try again.
+						continue;
+					}
+					else {
+						// Check to see which block we should read
+						byte[] bitmap = (byte[])record.getValue(BLOCK_MAP_BIN);
+						if (digest == null) {
+							// We must have a digest now
+							digest = hashFunction.getHash(mapKey);
+						}
+						int block = computeBlockNumber(digest, bitmap);
+			
+						try {
+							WritePolicy writePolicy = new WritePolicy();
+							writePolicy.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
+							record = client.operate(writePolicy, getCombinedKey(recordKeyValue, block),
+									obtainLock,
+									MapOperation.removeByKey(dataBinName, mapKeyValue, MapReturnType.VALUE),
+									releaseLock);
+							return record.getValue(dataBinName);
+						}
+						catch (AerospikeException ae1) {
+							switch (ae1.getResultCode()) {
+								case ResultCode.ELEMENT_EXISTS:
+								case ResultCode.KEY_NOT_FOUND_ERROR:
+									// Either: The block is locked and in the process of splitting (ELEMENT_EXISTS) or
+									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
+									// must re-read the root record and re-attempt the operation.
+									continue;
+								default:
+									throw ae1;
+							}
+						}
+					}
+				}
+			}
+			else {
+				throw ae;
+			}
+		}
+	}
+	
+
 	private String getLockId() {
 		return ID + "-" + Thread.currentThread().getId();
 	}
@@ -648,9 +732,101 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 	}
 	
+	
 	/**
 	 * Wait for the root block to complete splitting. The root block, once locked, will never unlock. However, it only 
-	 * gets locked with it's splitting, so it is expected that the first bit of the block map will be 1. If this is the
+	 * gets locked when it's splitting, so it is expected that the first bit of the block map will be 1. If this is the
+	 * case, return. If the block is locked but the first bit of the block map is not 1, wait for it to become 1 or
+	 * the lock to expire.
+	 * 
+	 * @param key
+	 * @param timeoutInMs
+	 * @return
+	 */
+	@SuppressWarnings("unchecked")
+	private Record waitForRootBlockToFullyLock(LockType lockType, Key key, long timeoutInMs) {
+		long now = new Date().getTime();
+		long timeoutEpoch = now + timeoutInMs;
+		String id = this.getLockId();
+		while (true) {
+			try {
+				Record record = client.get(null, key, BLOCK_MAP_BIN, lockType.getBinName());
+				if (record == null) {
+					return null;
+				}
+				byte[] blocks = (byte[]) record.getValue(BLOCK_MAP_BIN);
+				Map<String, List<Object>> lockData = (Map<String, List<Object>>) record.getMap(lockType.getBinName());
+				if (lockData == null || lockData.isEmpty()) {
+					// The block is not locked. This is not expected, so return null
+					return null;
+				}
+				else {
+					// The lock is held, see if the block has split yet.
+					if (bitwiseOperations.getBit(blocks, 0)) {
+						// This block has already split
+						return record;
+					}
+					else {
+						// See if a timeout has occurred on the lock
+						List<Object> lockInfo = lockData.get("locked");
+						String lockOwner = (String) lockInfo.get(0);
+						long lockExpiry = (long) lockInfo.get(1);
+						if (id.equals(lockOwner)) {
+							// This thread already owns the lock, done!
+							return record;
+						}
+						else {
+							now = new Date().getTime();
+							if (now < lockExpiry) {
+								if (timeoutInMs > 0 && now >= timeoutEpoch) {
+									// It's taken too long to get the lock
+									throw new AerospikeException(ResultCode.TIMEOUT, false);
+								}
+								else {
+									// Wait for 1ms and retry
+									wait(1);
+								}
+							}
+							else {
+								// The lock has expired. Try removing the lock with a gen check
+								WritePolicy writePolicy = new WritePolicy();
+								writePolicy.generation = record.generation;
+								writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
+								writePolicy.sendKey = this.sendKey;
+								List<Object> data = new ArrayList<>();
+								data.add(id);
+								data.add(now + MAX_LOCK_TIME);
+								try {
+									return client.operate(writePolicy, key, MapOperation.clear(lockType.getBinName()), Operation.get(BLOCK_MAP_BIN));
+								}
+								catch (AerospikeException ae2) {
+									if (ae2.getResultCode() == ResultCode.GENERATION_ERROR) {
+										// A different thread obtained the lock before we were able to do so, retry
+									}
+									else {
+										throw ae2;
+									}
+								}
+							}
+						}
+
+					}
+				}
+			}
+			catch (AerospikeException ae) {
+				if (ae.getResultCode() == ResultCode.GENERATION_ERROR) {
+					// We tried to obtain the lock which was not set, but a write occurred updating the block. Wait and try
+					wait(1);
+				}
+				else {
+					throw ae;
+				}
+			}
+		}
+	}
+	/**
+	 * Wait for the root block to complete splitting. The root block, once locked, will never unlock. However, it only 
+	 * gets locked when it's splitting, so it is expected that the first bit of the block map will be 1. If this is the
 	 * case, return. If the block is locked but the first bit of the block map is not 1, wait for it to become 1 or
 	 * the lock to expire. If the lock expires, assume the writing process has died, acquire the lock ourselves and perform the split.
 	 * 
@@ -739,7 +915,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			}
 			catch (AerospikeException ae) {
 				if (ae.getResultCode() == ResultCode.GENERATION_ERROR) {
-					// We tried to obtain the lock which was not set, but a write occurred updateing the block. Wait and try
+					// We tried to obtain the lock which was not set, but a write occurred updating the block. Wait and try
 					wait(1);
 				}
 				else {
@@ -748,6 +924,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			}
 		}
 	}
+
 	/**
 	 * Acquire a lock used for splitting an existing block into 2. Since this is an existing block, the lock must exist
 	 * unless the entire block has TTLd out, or just been removed after a block has split.
@@ -1050,8 +1227,9 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param mapKey - The key to insert this into the map with
 	 * @param mapKeyDigest - The digest of the key. Can be null in which case the digest will be computed if needed
 	 * @param value - The value to store in the map.
+	 * @return - true if the operation succeeded, false if the operation needs to re-read the root block and retry.
 	 */
-	private void putToSubBlock(String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Value value, byte[] blockMap, int blockMapGeneration) {
+	private boolean putToSubBlock(String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Value value, byte[] blockMap, int blockMapGeneration) {
 		WritePolicy writePolicy = new WritePolicy();
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 		
@@ -1073,11 +1251,19 @@ public class AdaptiveMap implements IAdaptiveMap {
 			if (recordsInBlock > this.recordThreshold) {
 				splitBlockAndInsert(recordKey, blockNum, mapKey, mapKeyDigest, value.getObject(), blockMap, blockMapGeneration);
 			}
+			return true;
 		}
 		catch (AerospikeException ae) {
-			// This situation should not arise. We expect to be on a particular block (which should exist) but it doesn't
-			System.err.printf("Expecting to find a record for '%s:%d' but it didn't exist\n", recordKey, blockNum);
-			throw ae;
+			switch (ae.getResultCode()) {
+				case ResultCode.ELEMENT_EXISTS:
+				case ResultCode.KEY_NOT_FOUND_ERROR:
+					// Either: The block is locked and in the process of splitting (ELEMENT_EXISTS) or
+					// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
+					// must re-read the root record and re-attempt the operation.
+					return false;
+				default:
+					throw ae;
+			}
 		}
 	}
 	
@@ -1121,33 +1307,37 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 		catch (AerospikeException ae) {
 			if (ae.getResultCode() == ResultCode.ELEMENT_EXISTS) {
-				// The lock already existing at the root level means that this block has split or is in the process of splitting, this lock will
-				// never get cleared once set. Thus, load the Block map and compute where to store the data. If the bit 0 of the block map is not
-				// set, it means that the root block is still splitting, must wait
-				Record record = waitForRootBlockLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
-				if (record == null) {
-					// The block vanished from under us, maybe it TTLd out, just try again. Note this is a VERY unusual case, so recursion here should
-					// be ok and not cause any stack overflow
-					put(recordKey, mapKey, mapKeyDigest, value);
-				}
-				else {
-					// Either the block has split or we must split it.
-					byte[] blockMap = (byte[]) record.getValue(BLOCK_MAP_BIN);
-					if (bitwiseOperations.getBit(blockMap, 0)) {
-						// The block has already split, we need to update the appropriate sub-block
-						int blockToAddTo;
-						if (mapKeyDigest == null) {
-							mapKeyDigest = hashFunction.getHash(mapKey);
-						}
-						blockToAddTo = computeBlockNumber(mapKeyDigest, blockMap);
-						putToSubBlock(recordKey, blockToAddTo, mapKey, mapKeyDigest, value, blockMap, record.generation);
+				while (true) {
+					// The lock already existing at the root level means that this block has split or is in the process of splitting, this lock will
+					// never get cleared once set. Thus, load the Block map and compute where to store the data. If the bit 0 of the block map is not
+					// set, it means that the root block is still splitting, must wait
+					Record record = waitForRootBlockLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
+					if (record == null) {
+						// The block vanished from under us, maybe it TTLd out, just try again. Note this is a VERY unusual case, so recursion here should
+						// be ok and not cause any stack overflow
+						put(recordKey, mapKey, mapKeyDigest, value);
+						break;
 					}
 					else {
-						// We own the lock, but must split this block
-						splitBlockAndInsert(recordKey, 0, mapKey, mapKeyDigest, value.getObject(), blockMap, record.generation, (Map<Object,Object>)record.getMap(dataBinName), record.getTimeToLive());
+						// Either the block has split or we must split it.
+						byte[] blockMap = (byte[]) record.getValue(BLOCK_MAP_BIN);
+						if (bitwiseOperations.getBit(blockMap, 0)) {
+							// The block has already split, we need to update the appropriate sub-block
+							if (mapKeyDigest == null) {
+								mapKeyDigest = hashFunction.getHash(mapKey);
+							}
+							int blockToAddTo = computeBlockNumber(mapKeyDigest, blockMap);
+							if (putToSubBlock(recordKey, blockToAddTo, mapKey, mapKeyDigest, value, blockMap, record.generation)) {
+								break;
+							}
+						}
+						else {
+							// We own the lock, but must split this block
+							splitBlockAndInsert(recordKey, 0, mapKey, mapKeyDigest, value.getObject(), blockMap, record.generation, (Map<Object,Object>)record.getMap(dataBinName), record.getTimeToLive());
+							break;
+						}
 					}
 				}
-				
 			}
 			else if (ae.getResultCode() == ResultCode.RECORD_TOO_BIG) {
 				splitBlockAndInsert(recordKey, 0, mapKey, mapKeyDigest, value.getObject(), null, -1);
@@ -1155,8 +1345,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			else {
 				throw ae;
 			}
-		}
-
+		}	
 		/*
 		
 		Key key = getCombinedKey(recordKey, blockToAddTo);
