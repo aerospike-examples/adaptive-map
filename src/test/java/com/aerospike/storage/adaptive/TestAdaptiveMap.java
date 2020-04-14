@@ -17,6 +17,8 @@
 package com.aerospike.storage.adaptive;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.nio.ByteBuffer;
@@ -25,7 +27,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.junit.After;
 import org.junit.Before;
@@ -217,6 +221,7 @@ public class TestAdaptiveMap {
 		Set<Record> results = map.getAll(null, recordKeyStr, operation);
 		time = System.nanoTime() - now;
 
+		// Check the reads using raw reads
 		Set<Long> expectedNumbers = new HashSet<>();
 		int resultCount = 0;
 		for (long i = (count/2)*1000; i < count * 1000; i += 1000, resultCount++) {
@@ -240,15 +245,58 @@ public class TestAdaptiveMap {
 	}
 	
 	@Test
-	public void testMultipleSplitAndReadValueKey() {
-		System.out.printf("\n*** testMultipleSplitAndReadValueKey ***\n");
+	public void testMultipleSplitAndReadAllValueKey() {
+		System.out.printf("\n*** testMultipleSplitAndReadAllValueKey ***\n");
 		testMultipleSplitAndRead(adaptiveMapWithValueKey);
 	}
 
 	@Test
-	public void testMultipleSplitAndReadDigestKey() {
-		System.out.printf("\n*** testMultipleSplitAndReadDigestKey ***\n");
+	public void testMultipleSplitAndReadAllDigestKey() {
+		System.out.printf("\n*** testMultipleSplitAndReadAllDigestKey ***\n");
 		testMultipleSplitAndRead(adaptiveMapWithDigestKey);
+	}
+
+	private String numToDigits(int num, int digitCount) {
+		String val = "00000000000000" + num;
+		return val.substring(val.length() - digitCount);
+	}
+	public void testMultipleSplitAndReadAll(IAdaptiveMap map) {
+		final String recordKeyStr = "key1";
+		final String mapKey = "mapKey";
+		// Clean up after previous runs
+		client.truncate(null, NAMESPACE, SET, null);
+
+		long now = System.nanoTime();
+		long count = (long)(MAP_SPLIT_SIZE * 3);
+		for (int i = 0; i < count; i++) {
+			String mapKeyToUse = mapKey + numToDigits(i, 5);
+			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
+			map.put(recordKeyStr, mapKeyToUse, null, Value.get(values));
+		}
+		long time = System.nanoTime() - now;
+		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
+		
+		now = System.nanoTime();
+		TreeMap<Object, Object> results = (TreeMap<Object, Object>) map.getAll(null, recordKeyStr);
+		time = System.nanoTime() - now;
+
+		NavigableSet<Object> navSet = results.navigableKeySet();
+		int i = 0;
+		for (Object key : navSet) {
+			List<Object> value = (List<Object>) results.get(key);
+			String mapKeyToUse = mapKey + numToDigits(i, 5);
+			assertEquals("Expected key " + i + " to be '" + mapKeyToUse +"' but received '" + key + "'", key, mapKeyToUse);
+			assertEquals("Expected value " + i + " to be '" + (i*1000) +"' but received '" + value.get(0) + "'", value.get(0), (long)i*1000);
+			i++;
+		}
+		assertEquals("Not enough records returned", count, i);
+		System.out.printf("Read %d results in %.1fms\n", results.size(), (time/1000000.0));
+	}
+	
+	@Test
+	public void testMultipleSplitAndReadValueKey() {
+		System.out.printf("\n*** testMultipleSplitAndReadValueKey ***\n");
+		testMultipleSplitAndReadAll(adaptiveMapWithValueKey);
 	}
 
 	private void dumpMap(Map<Object, Object> data) {
@@ -278,25 +326,30 @@ public class TestAdaptiveMap {
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
 		String mapKeyToRemove = mapKey + "1";
 		Object result = map.get(recordKeyStr, mapKeyToRemove);
-		System.out.println("Result before delete = " + result);
+		System.out.println("Result of get record before delete = " + result);
+		assertNotNull(result);
 		now = System.nanoTime();
-		Object deletedRecord = map.delete(recordKeyStr, mapKey+"1", null);
+		Object deletedRecord = map.delete(recordKeyStr, mapKey+"1");
 		time = System.nanoTime() - now;
 		System.out.printf("map.delete returned: %s in %.1fms\n", deletedRecord, time/1000000.0);
+		assertNotNull(deletedRecord);
 		
 		result = map.get(recordKeyStr, mapKeyToRemove);
 		System.out.println("Result after delete = " + result);
+		assertNull(result);
 	}
 	
 	@Test
 	public void testMultiRecordGet() {
 		System.out.printf("\n*** testMultiRecordGet ***\n");
+		// Clean up after previous runs
+		client.truncate(null, NAMESPACE, SET, null);
 		final int DAYS = 30;
-		final int COUNT_PER_DAY = 1000;
+		final int COUNT_PER_DAY = 10*MAP_SPLIT_SIZE;
 		String basePart = "base";
 		int count = 0;
 		for (int day = 1; day <= DAYS; day++) {
-			for (int i = 0; i < COUNT_PER_DAY; i++) {
+			for (int i = 0; i < COUNT_PER_DAY+5*day; i++) {
 				Map<String, Integer> map = new HashMap<>();
 				map.put("day", day);
 				map.put("i", i);
@@ -310,32 +363,38 @@ public class TestAdaptiveMap {
 			keys[i-1] = basePart + ":" + i;
 		}
 		
-		Set<Record>[] records = this.adaptiveMapWithValueKey.getAll(null, keys);
-		System.out.println(records);
+		long now = System.nanoTime();
+		TreeMap<Object, Object>[] records = this.adaptiveMapWithValueKey.getAll(null, keys);
+		long time = System.nanoTime() - now;
+		
+		int totalCount = 0;
 		Set<Long> counts = new HashSet<>();
-		for (int i = 0; i < DAYS; i++) {
-			Set<Record> dayRecords = records[i];
+		for (int day = 1; day <= DAYS; day++) {
+			TreeMap<Object, Object> dayRecords = records[day-1];
 			Set<Long> dayCounts = new HashSet<>();
-			for (Record thisRec : dayRecords) {
-				Map<String, Map<String,Long>> map = (Map<String, Map<String, Long>>) thisRec.getMap(MAP_BIN);
-				for (Map<String, Long> value : map.values()) {
-					dayCounts.add(value.get("i"));
-					counts.add(value.get("count"));
-				}
+			for (Object valueObj : dayRecords.values()) {
+				Map<String, Long> value = (Map<String, Long>) valueObj;
+				dayCounts.add(value.get("i"));
+				counts.add(value.get("count"));
+				totalCount++;
 			}
 			// Now validate that we have all the day counters
-			for (long j = 0; j < COUNT_PER_DAY; j++) {
-				assertTrue("Map for day "+i+" does not contain day-count of " + j, dayCounts.contains(j));
+			for (long j = 0; j < COUNT_PER_DAY+5*day; j++) {
+				assertTrue("Map for day "+day+" does not contain day-count of " + j, dayCounts.contains(j));
 				dayCounts.remove(j);
 			}
-			assertTrue("Day counts for day " + i + " should be empty, but still contains " + dayCounts, dayCounts.isEmpty());
+			assertTrue("Day counts for day " + day + " should be empty, but still contains " + dayCounts, dayCounts.isEmpty());
 		}
-		for (long j = 0; j < COUNT_PER_DAY * DAYS; j++) {
-			assertTrue("Missing count of " + j, counts.contains(j));
-			counts.remove(j);
+		long aCount = 0;
+		for (int day = 1; day <= DAYS; day++) {
+			for (int i = 0; i < COUNT_PER_DAY+5*day; i++) {
+				assertTrue("Missing count of " + aCount, counts.contains(aCount));
+				counts.remove(aCount);
+				aCount++;
+			}
 		}
 		assertTrue("Counts should be empty, but still contains " + counts, counts.isEmpty());
-		
+		System.out.printf("Retreived %d days records with %d total entries in %.1fms\n", DAYS, totalCount, time / 1000000.0);
 	}
 	/*
 	@Test

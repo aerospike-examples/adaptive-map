@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 
 import com.aerospike.client.AerospikeException;
@@ -220,6 +221,17 @@ public class AdaptiveMap implements IAdaptiveMap {
 	}
 	
 	/**
+	 * Convenience method to extract the contents of a set of records and put them into a map.
+	 */
+	private TreeMap<Object, Object> recordSetToMap(Set<Record> recordSet) {
+		TreeMap<Object, Object> map = new TreeMap<>();
+		for (Record record : recordSet) {
+			map.putAll(record.getMap(dataBinName));
+		}
+		return map;
+	}
+	
+	/**
 	 * Read a single key from the Map and return the value associated with it
 	 * @param recordKeyValue
 	 * @param mapKey
@@ -276,10 +288,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 	}
 	
 	/**
-	 * Get all of the records associated with the passed keyValue
+	 * Get all of the records associated with the passed keyValue. The result will be a TreeMap (ordered map by key) which contains all the records in the adaptive map.
 	 */
 	@Override
-	public Set<Record> getAll(Policy readPolicy, String keyValue) {
+	public TreeMap<Object, Object> getAll(Policy readPolicy, String keyValue) {
 		Key rootKey = new Key(namespace, setName, keyValue);
 		Set<Record> records = new HashSet<>();
 		Record result = client.get(readPolicy, rootKey);
@@ -346,7 +358,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 				records.add(result);
 			}
 		}
-		return records;
+		return recordSetToMap(records);
 	}
 
 	
@@ -365,7 +377,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * order as the input recordKeyValues. 
 	 */
 	@Override
-	public Set<Record>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues) {
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues) {
 		final int count = recordKeyValues.length;
 		
 		@SuppressWarnings("unchecked")
@@ -506,7 +518,12 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 		return records;
 		*/
-		return recordSet;
+		@SuppressWarnings("unchecked")
+		TreeMap<Object, Object>[] results = new TreeMap[count];
+		for (int i = 0; i < count; i++) {
+			results[i] = recordSetToMap(recordSet[i]);
+		}
+		return results;
 
 	}
 
@@ -667,6 +684,22 @@ public class AdaptiveMap implements IAdaptiveMap {
 				throw ae;
 			}
 		}
+	}
+	
+	public Object delete(String recordKeyValue, int mapKey) {
+		return delete(recordKeyValue, mapKey, null);
+	}
+	
+	public Object delete(String recordKeyValue, long mapKey) {
+		return delete(recordKeyValue, mapKey, null);
+	}
+	
+	public Object delete(String recordKeyValue, String mapKey) {
+		return delete(recordKeyValue, mapKey, null);
+	}
+	
+	public Object delete(String recordKeyValue, byte[] digest) {
+		return delete(recordKeyValue, null, digest);
 	}
 	
 

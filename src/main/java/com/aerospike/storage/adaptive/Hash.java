@@ -34,7 +34,7 @@ package com.aerospike.storage.adaptive;
  * <b>Note:</b> At the moment, there is no way of "unsplitting" a block if it shrinks down either by 
  * explicit removal of elements or by having items TTL out
  * <p>
- * When a block splits, the records must be divvied up into the 2 new sub-blocks in a deterministic fashion.
+ * When a block splits, the records must be divided up into the 2 new sub-blocks in a deterministic fashion.
  * This is done by using a RIPEMD160 hash of the map key (or other algorithm) to give a byte[] representing
  * that element. The K<sup>th</sup> bit of this hash is checked: if it is clear, the record belongs in sub-block
  * 2N+1, otherwise 2N+2. K here is the level of the tree (int)(log2N(N+1)-1).
