@@ -65,6 +65,8 @@ import com.aerospike.client.util.Crypto;
  */
 @SuppressWarnings("serial")
 public class AdaptiveMap implements IAdaptiveMap {
+	private static final String LOCK_MAP_ENTRY = "locked";
+
 	/** The name of the bin in which to store data */
 	private final String dataBinName;
 	
@@ -712,7 +714,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 		List<Object> data = Arrays.asList(new Object[] { id, now + MAX_LOCK_TIME });
 		MapPolicy policy = new MapPolicy(MapOrder.UNORDERED, MapWriteFlags.CREATE_ONLY);
-		return MapOperation.put(policy, LOCK_BIN, Value.get("locked"), Value.get(data));
+		return MapOperation.put(policy, LOCK_BIN, Value.get(LOCK_MAP_ENTRY), Value.get(data));
 	}
 	
 	private Operation getReleaseLockOperation(String id) {
@@ -801,7 +803,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 					}
 					else {
 						// See if a timeout has occurred on the lock
-						List<Object> lockInfo = lockData.get("locked");
+						List<Object> lockInfo = lockData.get(LOCK_MAP_ENTRY);
 						String lockOwner = (String) lockInfo.get(0);
 						long lockExpiry = (long) lockInfo.get(1);
 						if (id.equals(lockOwner)) {
@@ -897,7 +899,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 					}
 					else {
 						// See if a timeout has occurred on the lock
-						List<Object> lockInfo = lockData.get("locked");
+						List<Object> lockInfo = lockData.get(LOCK_MAP_ENTRY);
 						String lockOwner = (String) lockInfo.get(0);
 						long lockExpiry = (long) lockInfo.get(1);
 						if (id.equals(lockOwner)) {
@@ -929,7 +931,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 								MapPolicy forcePolicy = new MapPolicy(MapOrder.UNORDERED, MapWriteFlags.DEFAULT);
 								Operation dataOperation = Operation.get(dataBinName);
 								try {
-									record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get("locked"), Value.get(data)), dataOperation);
+									record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), dataOperation);
 									return record;
 								}
 								catch (AerospikeException ae2) {
@@ -1011,7 +1013,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 							continue;
 						}
 						else {
-							List<Object> lockInfo = lockData.get("locked");
+							List<Object> lockInfo = lockData.get(LOCK_MAP_ENTRY);
 							String lockOwner = (String) lockInfo.get(0);
 							long lockExpiry = (long) lockInfo.get(1);
 							if (id.equals(lockOwner)) {
@@ -1042,11 +1044,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 									MapPolicy forcePolicy = new MapPolicy(MapOrder.UNORDERED, MapWriteFlags.DEFAULT);
 									try {
 										if (dataOperation != null) {
-											record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get("locked"), Value.get(data)), dataOperation);
+											record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), dataOperation);
 											return record;
 										}
 										else {
-											client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get("locked"), Value.get(data)));
+											client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)));
 											return null;
 										}
 									}
