@@ -43,17 +43,17 @@ public interface IAdaptiveMap {
 	 * Remove all the sub-records in the adaptive map
 	 * @param recordKeyValue
 	 */
-	public void deleteAll(String recordKeyValue);
+	public void deleteAll(WritePolicy writePolicy, String recordKeyValue);
 	
 	/**
 	 * Remove a single record from the underlying map
 	 * @param recordKeyValue - the key of the record
 	 * @param mapKey - the key to remove from the map 
 	 */
-	public Object delete(String recordKeyValue, int mapKey);
-	public Object delete(String recordKeyValue, long mapKey);
-	public Object delete(String recordKeyValue, String mapKey);
-	public Object delete(String recordKeyValue, byte[] digest);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, int mapKey);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, long mapKey);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, String mapKey);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, byte[] digest);
 	
 	/**
 	 * Insert / Update a value in the adadptive map

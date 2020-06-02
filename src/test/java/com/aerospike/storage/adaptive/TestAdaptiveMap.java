@@ -329,7 +329,7 @@ public class TestAdaptiveMap {
 		System.out.println("Result of get record before delete = " + result);
 		assertNotNull(result);
 		now = System.nanoTime();
-		Object deletedRecord = map.delete(recordKeyStr, mapKey+"1");
+		Object deletedRecord = map.delete(null, recordKeyStr, mapKey+"1");
 		time = System.nanoTime() - now;
 		System.out.printf("map.delete returned: %s in %.1fms\n", deletedRecord, time/1000000.0);
 		assertNotNull(deletedRecord);

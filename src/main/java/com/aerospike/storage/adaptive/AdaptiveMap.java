@@ -616,7 +616,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param operation
 	 * @return
 	 */
-	public Object delete(String recordKeyValue, Object mapKey, byte[] digest) {
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest) {
 		Value mapKeyValue;
 		if (useDigestForMapKey || mapKey == null) {
 			mapKeyValue = Value.get(digest == null ? getHashFunction().getHash(mapKey) : digest);
@@ -632,7 +632,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 		Key key = getCombinedKey(recordKeyValue, 0);
 
 		try {
-			Record record = client.operate(null, key, obtainLock, removeFromMap, getBlockMap, releaseLock);
+			Record record = client.operate(writePolicy, key, obtainLock, removeFromMap, getBlockMap, releaseLock);
 			if (record == null) {
 				return null;
 			}
@@ -659,9 +659,9 @@ public class AdaptiveMap implements IAdaptiveMap {
 						int block = computeBlockNumber(digest, bitmap);
 			
 						try {
-							WritePolicy writePolicy = new WritePolicy();
-							writePolicy.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
-							record = client.operate(writePolicy, getCombinedKey(recordKeyValue, block),
+							WritePolicy writePolicy2 = new WritePolicy(writePolicy);
+							writePolicy2.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
+							record = client.operate(writePolicy2, getCombinedKey(recordKeyValue, block),
 									obtainLock,
 									MapOperation.removeByKey(dataBinName, mapKeyValue, MapReturnType.VALUE),
 									releaseLock);
@@ -688,20 +688,20 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 	}
 	
-	public Object delete(String recordKeyValue, int mapKey) {
-		return delete(recordKeyValue, mapKey, null);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, int mapKey) {
+		return delete(writePolicy, recordKeyValue, mapKey, null);
 	}
 	
-	public Object delete(String recordKeyValue, long mapKey) {
-		return delete(recordKeyValue, mapKey, null);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, long mapKey) {
+		return delete(writePolicy, recordKeyValue, mapKey, null);
 	}
 	
-	public Object delete(String recordKeyValue, String mapKey) {
-		return delete(recordKeyValue, mapKey, null);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, String mapKey) {
+		return delete(writePolicy, recordKeyValue, mapKey, null);
 	}
 	
-	public Object delete(String recordKeyValue, byte[] digest) {
-		return delete(recordKeyValue, null, digest);
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, byte[] digest) {
+		return delete(writePolicy, recordKeyValue, null, digest);
 	}
 	
 
@@ -1408,7 +1408,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 		*/
 	}
 	
-	public void deleteAll(String recordKeyValue) {
+	public void deleteAll(WritePolicy writePolicy, String recordKeyValue) {
 		Key key = getCombinedKey(recordKeyValue, 0);
 		Record record = client.get(null, key);
 		if (record != null) {
@@ -1422,7 +1422,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			
 			for (int block : blockList) {
 				if (block > 0) {
-					client.delete(null, getCombinedKey(recordKeyValue, block));
+					client.delete(writePolicy, getCombinedKey(recordKeyValue, block));
 				}
 			}
 
