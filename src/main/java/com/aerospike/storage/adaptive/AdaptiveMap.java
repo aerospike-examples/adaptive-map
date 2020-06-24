@@ -659,7 +659,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 						int block = computeBlockNumber(digest, bitmap);
 			
 						try {
-							WritePolicy writePolicy2 = new WritePolicy(writePolicy);
+							WritePolicy writePolicy2 = writePolicy == null ? new WritePolicy() : new WritePolicy(writePolicy);
 							writePolicy2.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 							record = client.operate(writePolicy2, getCombinedKey(recordKeyValue, block),
 									obtainLock,
