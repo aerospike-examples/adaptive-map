@@ -51,7 +51,7 @@ import com.aerospike.client.command.Buffer;
 public class TestAdaptiveMap {
 
 	private AdaptiveMap library;
-	private final String HOST = "172.28.128.5";
+	private final String HOST = "127.0.0.1";
 	private AerospikeClient client;
 	private IAdaptiveMap adaptiveMapWithValueKey;
 	private IAdaptiveMap adaptiveMapWithDigestKey;
