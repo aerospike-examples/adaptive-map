@@ -149,7 +149,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 		this.client = client;
 		this.setName = setName;
 		this.namespace = namespace;
-		this.mapPolicy = mapPolicy == null ? new MapPolicy() : mapPolicy;
+		this.mapPolicy = mapPolicy == null ? new MapPolicy(MapOrder.KEY_ORDERED, 0) : mapPolicy;
 		this.useDigestForMapKey = useDigestForMapKey;
 		this.recordThreshold = recordThreshold;
 		if (mapBin == null) {
