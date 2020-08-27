@@ -109,7 +109,7 @@ public class TestAdaptiveMap {
 		// Clean up after previous runs
 		client.delete(null, recordKey);
 		
-		map.put(recordKeyStr, mapKey, null, Value.get("test"));
+		map.put(null, recordKeyStr, mapKey, null, Value.get("test"));
 		
 		assertTrue(client.exists(null, recordKey));
 		Object result = map.get(recordKeyStr, mapKey);
@@ -135,7 +135,7 @@ public class TestAdaptiveMap {
 		long now = System.nanoTime();
 		long count = (long)(MAP_SPLIT_SIZE * 1.5);
 		for (int i = 0; i <  count; i++) {
-			map.put(recordKeyStr, mapKey+i, null, Value.get(mapKey+i));
+			map.put(null, recordKeyStr, mapKey+i, null, Value.get(mapKey+i));
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
@@ -170,7 +170,7 @@ public class TestAdaptiveMap {
 		long count = (long)(MAP_SPLIT_SIZE * 10);
 		for (int i = 0; i <  count; i++) {
 			String mapKeyToUse = mapKey + i;
-			map.put(recordKeyStr, mapKeyToUse, null, Value.get(mapKeyToUse));
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(mapKeyToUse));
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
@@ -207,7 +207,7 @@ public class TestAdaptiveMap {
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + i;
 			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
-			map.put(recordKeyStr, mapKeyToUse, null, Value.get(values));
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(values));
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
@@ -271,7 +271,7 @@ public class TestAdaptiveMap {
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + numToDigits(i, 5);
 			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
-			map.put(recordKeyStr, mapKeyToUse, null, Value.get(values));
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(values));
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
@@ -320,7 +320,7 @@ public class TestAdaptiveMap {
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + i;
 			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
-			map.put(recordKeyStr, mapKeyToUse, null, Value.get(values));
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(values));
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
@@ -354,7 +354,7 @@ public class TestAdaptiveMap {
 				map.put("day", day);
 				map.put("i", i);
 				map.put("count", count++);
-				this.adaptiveMapWithValueKey.put(basePart + ":" + day, day + "-" + i, null, Value.get(map));
+				this.adaptiveMapWithValueKey.put(null, basePart + ":" + day, day + "-" + i, null, Value.get(map));
 				
 			}
 		}

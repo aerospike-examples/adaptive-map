@@ -56,13 +56,14 @@ public interface IAdaptiveMap {
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, byte[] digest);
 	
 	/**
-	 * Insert / Update a value in the adadptive map
+	 * Insert / Update a value in the adaptive map
+	 * @param writePolicy - the write policy to use for retries, etc. Some of the parameters like the RecordExistsAction will be overridden as necessary
 	 * @param recordKey - the key of the record 
 	 * @param mapKey - the key of the map to insert / update.
 	 * @param mapKeyDigest - the digest of the key. Can be null. If null and it is needed, it will be obtained by invoking the getHashFunction().getHash(mapKey)
 	 * @param value - The value to be stored in the map
 	 */
-	public void put(String recordKey, Object mapKey, byte[] mapKeyDigest, Value value);
+	public void put(WritePolicy writePolicy, String recordKey, Object mapKey, byte[] mapKeyDigest, Value value);
 	
 	/**
 	 * Perform all the operations passed to this method on every map/sub-map associated with the passed key. The operations may be applied on 

@@ -152,8 +152,8 @@ public class AdaptiveMap implements IAdaptiveMap {
 		this.mapPolicy = mapPolicy == null ? new MapPolicy(MapOrder.KEY_ORDERED, 0) : mapPolicy;
 		this.useDigestForMapKey = useDigestForMapKey;
 		this.recordThreshold = recordThreshold;
-		if (mapBin == null) {
-			throw new NullPointerException("mapBin cannot be null");
+		if (mapBin == null || mapBin.isEmpty()) {
+			throw new IllegalArgumentException("mapBin must be specified");
 		}
 		else if (LOCK_BIN.equals(mapBin) || BLOCK_MAP_BIN.equals(mapBin)) {
 			throw new IllegalArgumentException("mapBin cannot be either " + LOCK_BIN + " or " + BLOCK_MAP_BIN);
@@ -1112,12 +1112,12 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param mapKeyDigest
 	 * @param dataInsertOp
 	 */
-	private void splitBlockAndInsert(String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration) {
-		splitBlockAndInsert(recordKey, blockNum, mapKey, mapKeyDigest, dataValue, blockMap, blockMapGeneration, null, 0);
+	private void splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration) {
+		splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, dataValue, blockMap, blockMapGeneration, null, 0);
 	}
 	
 	@SuppressWarnings("unchecked")
-	private void splitBlockAndInsert(String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration, Map<Object, Object> data, int dataTTL) {
+	private void splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration, Map<Object, Object> data, int dataTTL) {
 		// We will always need a digest here
 		if (mapKeyDigest == null) {
 			mapKeyDigest = hashFunction.getHash(mapKey);
@@ -1197,14 +1197,16 @@ public class AdaptiveMap implements IAdaptiveMap {
 		// Now write the new records. In theory they should be CREATE_ONLY, but if we use this flag and another thread got part of the
 		// way through splitting this block and died, the records might exist and it would cause this process to fail. 
 		// Note that we must preserve the TTL of the current time.
-		WritePolicy wp = new WritePolicy();
-		wp.expiration = dataTTL;
-		wp.sendKey = this.sendKey;
+		if (writePolicy == null) {
+			writePolicy = new WritePolicy();
+		}
+		writePolicy.expiration = dataTTL;
+		writePolicy.sendKey = this.sendKey;
 
 		for (Integer newBlockNum : dataHalves.keySet()) {
 			// Note: use the map operations to insert the data, otherwise it's possible to get duplicate keys in maps
 			//client.put(wp, getCombinedKey(recordKey, newBlockNum), new Bin(dataBinName, dataHalves.get(newBlockNum)));
-			client.operate(wp, getCombinedKey(recordKey, newBlockNum), MapOperation.putItems(mapPolicy, dataBinName, dataHalves.get(newBlockNum)));
+			client.operate(writePolicy, getCombinedKey(recordKey, newBlockNum), MapOperation.putItems(mapPolicy, dataBinName, dataHalves.get(newBlockNum)));
 		}
 		
 		// The sub-records now exist, update the bitmap and delete this record
@@ -1212,7 +1214,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 		if (blockNum > 0) {
 			// This does not need to be done durably. If it comes back it will just TTL later
 			// TODO: What to do if the TTL is 0?
-			client.delete(null, key);
+			client.delete(writePolicy, key);
 		}
 	}
 	
@@ -1264,8 +1266,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param value - The value to store in the map.
 	 * @return - true if the operation succeeded, false if the operation needs to re-read the root block and retry.
 	 */
-	private boolean putToSubBlock(String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Value value, byte[] blockMap, int blockMapGeneration) {
-		WritePolicy writePolicy = new WritePolicy();
+	private boolean putToSubBlock(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Value value, byte[] blockMap, int blockMapGeneration) {
+		if (writePolicy == null) {
+			writePolicy = new WritePolicy();
+		}
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 		
 		// We want to insert into the map iff the record is not locked. Hence, we will write the lock with CREATE_ONLY, insert
@@ -1284,7 +1288,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			Record result = client.operate(writePolicy, key, obtainLock, addToMap, releaseLock);
 			int recordsInBlock = result.getInt(dataBinName);
 			if (recordsInBlock > this.recordThreshold) {
-				splitBlockAndInsert(recordKey, blockNum, mapKey, mapKeyDigest, value.getObject(), blockMap, blockMapGeneration);
+				splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, value.getObject(), blockMap, blockMapGeneration);
 			}
 			return true;
 		}
@@ -1309,14 +1313,16 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param mapKeyDigest - the digest encoding of the mapKey. If this is null, it will be determined when needed
 	 * @param value - the value associate with the key.
 	 */
-	public void put(String recordKey, Object mapKey, byte[] mapKeyDigest, Value value) {
+	public void put(WritePolicy writePolicy, String recordKey, Object mapKey, byte[] mapKeyDigest, Value value) {
 		if (useDigestForMapKey && mapKey != null && mapKeyDigest == null) {
 			mapKeyDigest = hashFunction.getHash(mapKey);
 		}
 		
 		// We insert into the root record iff the Lock is not held. If the lock is held it means that this block
 		// has split and we must read further.
-		WritePolicy writePolicy = new WritePolicy();
+		if (writePolicy == null) {
+			writePolicy = new WritePolicy();
+		}
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE;
 		
 		// We want to insert into the map iff the record is not locked. Hence, we will write the lock with CREATE_ONLY, insert
@@ -1337,7 +1343,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			int recordsInBlock = result.getInt(dataBinName);
 			if (recordsInBlock > this.recordThreshold) {
 				// TODO: Again, is it better to read the whole record whilst we have it, or re-read it
-				splitBlockAndInsert(recordKey, 0, mapKey, mapKeyDigest, value.getObject(), (byte[])result.getValue(BLOCK_MAP_BIN), result.generation);
+				splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), (byte[])result.getValue(BLOCK_MAP_BIN), result.generation);
 			}
 		}
 		catch (AerospikeException ae) {
@@ -1350,7 +1356,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 					if (record == null) {
 						// The block vanished from under us, maybe it TTLd out, just try again. Note this is a VERY unusual case, so recursion here should
 						// be ok and not cause any stack overflow
-						put(recordKey, mapKey, mapKeyDigest, value);
+						put(writePolicy, recordKey, mapKey, mapKeyDigest, value);
 						break;
 					}
 					else {
@@ -1362,20 +1368,20 @@ public class AdaptiveMap implements IAdaptiveMap {
 								mapKeyDigest = hashFunction.getHash(mapKey);
 							}
 							int blockToAddTo = computeBlockNumber(mapKeyDigest, blockMap);
-							if (putToSubBlock(recordKey, blockToAddTo, mapKey, mapKeyDigest, value, blockMap, record.generation)) {
+							if (putToSubBlock(writePolicy, recordKey, blockToAddTo, mapKey, mapKeyDigest, value, blockMap, record.generation)) {
 								break;
 							}
 						}
 						else {
 							// We own the lock, but must split this block
-							splitBlockAndInsert(recordKey, 0, mapKey, mapKeyDigest, value.getObject(), blockMap, record.generation, (Map<Object,Object>)record.getMap(dataBinName), record.getTimeToLive());
+							splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), blockMap, record.generation, (Map<Object,Object>)record.getMap(dataBinName), record.getTimeToLive());
 							break;
 						}
 					}
 				}
 			}
 			else if (ae.getResultCode() == ResultCode.RECORD_TOO_BIG) {
-				splitBlockAndInsert(recordKey, 0, mapKey, mapKeyDigest, value.getObject(), null, -1);
+				splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), null, -1);
 			}
 			else {
 				throw ae;
