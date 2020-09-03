@@ -1202,6 +1202,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 		writePolicy.expiration = dataTTL;
 		writePolicy.sendKey = this.sendKey;
+		writePolicy.recordExistsAction = RecordExistsAction.UPDATE;
 
 		for (Integer newBlockNum : dataHalves.keySet()) {
 			// Note: use the map operations to insert the data, otherwise it's possible to get duplicate keys in maps
