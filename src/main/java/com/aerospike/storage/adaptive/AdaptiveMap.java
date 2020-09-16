@@ -1282,12 +1282,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE;
 
 		for (Integer newBlockNum : dataHalves.keySet()) {
-//System.out.printf("%s %s : %d->%d\n", Thread.currentThread().getName(), key, blockNum, newBlockNum);
 			// Note: use the map operations to insert the data, otherwise it's possible to get duplicate keys in maps
 			//client.put(wp, getCombinedKey(recordKey, newBlockNum), new Bin(dataBinName, dataHalves.get(newBlockNum)));
 			client.operate(writePolicy, getCombinedKey(recordKey, newBlockNum), MapOperation.putItems(mapPolicy, dataBinName, dataHalves.get(newBlockNum)));
 		}
-//System.out.printf("%s %s : Updating bitmap\n", Thread.currentThread().getName(), key);
 		
 		// The sub-records now exist, update the bitmap and delete this record
 		updateRootBlockBitmap(recordKey, blockNum, blockMap, blockMapGeneration);
@@ -1297,7 +1295,6 @@ public class AdaptiveMap implements IAdaptiveMap {
 			if (forceDurableDeletes) {
 				writePolicy.durableDelete = true;
 			}
-//System.out.printf("%s %s : Deleting key\n", Thread.currentThread().getName(), key);
 			client.delete(writePolicy, key);
 		}
 		return true;
@@ -1313,7 +1310,6 @@ public class AdaptiveMap implements IAdaptiveMap {
 			writePolicy.sendKey = this.sendKey;
 
 			try {
-//System.out.printf("Updating %s %s [%03d] [%03d] bitmap to %s\n", Thread.currentThread().getName(), key, blockMapGeneration, blockNum, bitwiseOperations.toString(blockMap));
 				if (blockNum == 0) {
 					// The root block has split, remove the data from the root block. Do NOT release the lock as this is a flag to imply we've split.
 					client.put(writePolicy, key, new Bin(BLOCK_MAP_BIN, Value.get(blockMap)), Bin.asNull(dataBinName));
@@ -1326,13 +1322,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 			catch (AerospikeException ae) {
 				switch (ae.getResultCode()) {
 					case ResultCode.GENERATION_ERROR:
-//System.out.printf("%s %s: retrying split on generation\n", Thread.currentThread().getName(), key);
 						// Another thread has updated this record, which must be because another block has split, re-read
 						Record newRecord = client.get(null, key, BLOCK_MAP_BIN);
 						blockMap = (byte[]) newRecord.getValue(BLOCK_MAP_BIN);
-//System.out.printf("%s %s: re-read: %d, %s %d\n", Thread.currentThread().getName(), key, newRecord.generation, bitwiseOperations.toString(blockMap), blockNum);
 						blockMap = bitwiseOperations.setBit(blockMap, blockNum);
-//System.out.printf("%s %s: new value: %d, %s\n", Thread.currentThread().getName(), key, newRecord.generation, bitwiseOperations.toString(blockMap));
 						blockMapGeneration = newRecord.generation;
 						break;
 						
