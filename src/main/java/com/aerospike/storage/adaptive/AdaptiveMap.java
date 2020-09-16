@@ -31,6 +31,7 @@ import java.util.UUID;
 import com.aerospike.client.AerospikeException;
 import com.aerospike.client.Bin;
 import com.aerospike.client.IAerospikeClient;
+import com.aerospike.client.Info;
 import com.aerospike.client.Key;
 import com.aerospike.client.Operation;
 import com.aerospike.client.Record;
@@ -41,6 +42,8 @@ import com.aerospike.client.cdt.MapOrder;
 import com.aerospike.client.cdt.MapPolicy;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.cdt.MapWriteFlags;
+import com.aerospike.client.cluster.Node;
+import com.aerospike.client.operation.BitOperation;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.GenerationPolicy;
 import com.aerospike.client.policy.Policy;
@@ -102,6 +105,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 	private final MapPolicy mapPolicy;
 	private final boolean useDigestForMapKey;
 	private final int recordThreshold;
+	private final boolean forceDurableDeletes;
 
 	private static Value objectToValue(Object obj) {
 		if (obj instanceof Long) {
@@ -144,8 +148,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param recordThreshold - How many records can be stored in a block before the block splits. For example, if this number is set to 
 	 * 1,000, the 1,001st record would cause the block to split on inserting. It is possible that the block will split before this however --
 	 * if the insertion of a map entry results in a RECORD_TOO_BIG exception, the block will split automatically if there is > 1 entry.
+	 * @param forceDurableDeletes - If true, all deletes will be done durably irrespective of the durableDelete flag passed in the write policy. If false, the writePolicy will be honored.
+	 * For strong consistency namespaces with strong-consistency-allow-expunges set to false, this flag should be true.
 	 */
-	public AdaptiveMap(final IAerospikeClient client, final String namespace, final String setName, final String mapBin, final MapPolicy mapPolicy, final boolean useDigestForMapKey, int recordThreshold) {
+	public AdaptiveMap(final IAerospikeClient client, final String namespace, final String setName, final String mapBin, final MapPolicy mapPolicy, final boolean useDigestForMapKey, int recordThreshold, boolean forceDurableDeletes) {
 		this.client = client;
 		this.setName = setName;
 		this.namespace = namespace;
@@ -159,7 +165,64 @@ public class AdaptiveMap implements IAdaptiveMap {
 			throw new IllegalArgumentException("mapBin cannot be either " + LOCK_BIN + " or " + BLOCK_MAP_BIN);
 		}
 		this.dataBinName = mapBin;
+		this.forceDurableDeletes = forceDurableDeletes;
 	}
+
+	/**
+	 * Create a new adaptive map.
+	 * <p/>
+	 * Note that this constructor has to determine whether to force durable deletes and so it needs to connect to the cluster and use the Info protocol.
+	 * Hence, if this constructor is used, ensure the connected user has priviledges to do this.
+	 * 
+	 * @param client - the AerospikeClient used to manipulate this map
+	 * @param namespace - The namespace for the map
+	 * @param setName - The set name to use for the map
+	 * @param mapBin - The bin name to store the bin in. Note that this class reserves the right to create other bins on the record
+	 * to store things like lock information
+	 * @param mapPolicy - The mapPolicy to use when inserting an element into the map
+	 * @param useDigestForMapKey - Whether to use the digest of the map key for the map key or not. If the natural key is abstract (eg a transaction id)
+	 * and is not needed in it's own right, it can be more efficient to store the digest of this natural key in the abstract map rather than actual key. Obviously
+	 * if the map key has meaning (eg a timestamp) then this cannot be stored as a digest
+	 * <p>
+	 * The advantage of storing the digest as a map key rather than the natural key is that it is more efficient when a block (sub-part of a map) splits.
+	 * Consider a case where the block contains 1,000 elements and has to split: 
+	 * <p>
+	 * The block splits into 2 blocks, both of which contain around 500 elements. In order to get a deterministic yet moderately equal split, a particular 
+	 * bit in the digest is used. If this bit is 0 the record belongs to one block, if it's 1 then the record belongs to the other block. However, in order
+	 * to make this determination, the digest of each map entry is needed. If the digest is stored as the key then this is trivial to determine. However,
+	 * if the natural key is stored, the digest must be computed for each record in the block. 
+	 * @param recordThreshold - How many records can be stored in a block before the block splits. For example, if this number is set to 
+	 * 1,000, the 1,001st record would cause the block to split on inserting. It is possible that the block will split before this however --
+	 * if the insertion of a map entry results in a RECORD_TOO_BIG exception, the block will split automatically if there is > 1 entry.
+	 */
+	public AdaptiveMap(final IAerospikeClient client, final String namespace, final String setName, final String mapBin, final MapPolicy mapPolicy, final boolean useDigestForMapKey, int recordThreshold) {
+		// We need to determine if durable deletes must be done irrespective of the write policy, so look at the namespace info for this.
+		this(client, namespace, setName, mapBin, mapPolicy, useDigestForMapKey, recordThreshold, forceDurableDeletes(client, namespace));
+	}
+
+	private static boolean forceDurableDeletes(IAerospikeClient client, String namespace) {
+		Node[] nodes = client.getNodes();
+		if (nodes.length == 0) {
+			throw new IllegalArgumentException("Could not connect to the cluster");
+		}
+		String[] config = Info.request(client.getNodes()[0], "namespace/"+namespace).split(";");
+		boolean isSC = false;
+		boolean allowExpunge = false;
+		for (String thisConfig : config) {
+			if (thisConfig.startsWith("strong-consistency")) {
+				String[] nameAndValue = thisConfig.split("=");
+				String name = nameAndValue[0];
+				String value = nameAndValue[1];
+				if ("strong-consistency".equals(name)) {
+					isSC = Boolean.valueOf(value);
+				}
+				else if ("strong-consistency-allow-expunge".equals(name)) {
+					allowExpunge = Boolean.valueOf(value);
+				}
+			}
+		}
+		return isSC && (!allowExpunge);
+	}	
 	
 	/**
 	 * Set the hash function this class will use. If not set, will default to RIPEMD160
@@ -982,7 +1045,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 				wp.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 				wp.sendKey = this.sendKey;
 				if (dataOperation != null) {
-					Record record = client.operate(wp, key, getObtainLockOperation(id, now), dataOperation);
+					Record record = client.operate(wp, key, getObtainLockOperation(id, now), Operation.get(BLOCK_MAP_BIN), dataOperation);
 					return record;
 				}
 				else {
@@ -998,10 +1061,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 					// the lock is already owned
 					Record record;
 					if (getData) {
-						record = client.get(null, key, lockType.getBinName(), dataBinName);
+						record = client.get(null, key, lockType.getBinName(), BLOCK_MAP_BIN, dataBinName);
 					}
 					else {
-						record = client.get(null, key, lockType.getBinName());
+						record = client.get(null, key, lockType.getBinName(), BLOCK_MAP_BIN);
 					}
 					if (record == null) {
 						throw new RecordDoesNotExistException(ae);
@@ -1044,11 +1107,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 									MapPolicy forcePolicy = new MapPolicy(MapOrder.UNORDERED, MapWriteFlags.DEFAULT);
 									try {
 										if (dataOperation != null) {
-											record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), dataOperation);
+											record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), Operation.get(BLOCK_MAP_BIN), dataOperation);
 											return record;
 										}
 										else {
-											client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)));
+											client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), Operation.get(BLOCK_MAP_BIN));
 											return null;
 										}
 									}
@@ -1111,13 +1174,14 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * @param mapKey
 	 * @param mapKeyDigest
 	 * @param dataInsertOp
+	 * @return true if the operation was successful, false if the operation failed but it is a recoverable error where retrying may succeed.
 	 */
-	private void splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration) {
-		splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, dataValue, blockMap, blockMapGeneration, null, 0);
+	private boolean splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration) {
+		return splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, dataValue, blockMap, blockMapGeneration, null, 0);
 	}
 	
 	@SuppressWarnings("unchecked")
-	private void splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration, Map<Object, Object> data, int dataTTL) {
+	private boolean splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration, Map<Object, Object> data, int dataTTL) {
 		// We will always need a digest here
 		if (mapKeyDigest == null) {
 			mapKeyDigest = hashFunction.getHash(mapKey);
@@ -1145,7 +1209,20 @@ public class AdaptiveMap implements IAdaptiveMap {
 		// We want to get the lock and retrieve all the data in one hit
 		Key key = getCombinedKey(recordKey, blockNum);
 		if (data == null) {
-			Record currentRecord = acquireLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME, true);
+			Record currentRecord;
+			try {
+				currentRecord = acquireLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME, true);
+			}
+			catch (RecordDoesNotExistException rdnee) {
+				// The lock could not be obtained becasue the underlying record has been removed. THis could be because another 
+				// thread already split it. Retry the insert again
+				return false;
+			}
+			// It is possible that the block has been split by another thread since we determined we needed to split it. Check the bit in the bitmap
+			byte[] newBlockMap = (byte[])currentRecord.getValue(BLOCK_MAP_BIN);
+			if (bitwiseOperations.getBit(newBlockMap, blockNum)) {
+				return false;
+			}
 			data = (Map<Object, Object>)currentRecord.getMap(dataBinName);
 			dataTTL = currentRecord.getTimeToLive();
 			if (blockNum == 0) {
@@ -1205,18 +1282,25 @@ public class AdaptiveMap implements IAdaptiveMap {
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE;
 
 		for (Integer newBlockNum : dataHalves.keySet()) {
+//System.out.printf("%s %s : %d->%d\n", Thread.currentThread().getName(), key, blockNum, newBlockNum);
 			// Note: use the map operations to insert the data, otherwise it's possible to get duplicate keys in maps
 			//client.put(wp, getCombinedKey(recordKey, newBlockNum), new Bin(dataBinName, dataHalves.get(newBlockNum)));
 			client.operate(writePolicy, getCombinedKey(recordKey, newBlockNum), MapOperation.putItems(mapPolicy, dataBinName, dataHalves.get(newBlockNum)));
 		}
+//System.out.printf("%s %s : Updating bitmap\n", Thread.currentThread().getName(), key);
 		
 		// The sub-records now exist, update the bitmap and delete this record
 		updateRootBlockBitmap(recordKey, blockNum, blockMap, blockMapGeneration);
 		if (blockNum > 0) {
 			// This does not need to be done durably. If it comes back it will just TTL later
 			// TODO: What to do if the TTL is 0?
+			if (forceDurableDeletes) {
+				writePolicy.durableDelete = true;
+			}
+//System.out.printf("%s %s : Deleting key\n", Thread.currentThread().getName(), key);
 			client.delete(writePolicy, key);
 		}
+		return true;
 	}
 	
 	
@@ -1229,6 +1313,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			writePolicy.sendKey = this.sendKey;
 
 			try {
+//System.out.printf("Updating %s %s [%03d] [%03d] bitmap to %s\n", Thread.currentThread().getName(), key, blockMapGeneration, blockNum, bitwiseOperations.toString(blockMap));
 				if (blockNum == 0) {
 					// The root block has split, remove the data from the root block. Do NOT release the lock as this is a flag to imply we've split.
 					client.put(writePolicy, key, new Bin(BLOCK_MAP_BIN, Value.get(blockMap)), Bin.asNull(dataBinName));
@@ -1241,10 +1326,13 @@ public class AdaptiveMap implements IAdaptiveMap {
 			catch (AerospikeException ae) {
 				switch (ae.getResultCode()) {
 					case ResultCode.GENERATION_ERROR:
+//System.out.printf("%s %s: retrying split on generation\n", Thread.currentThread().getName(), key);
 						// Another thread has updated this record, which must be because another block has split, re-read
 						Record newRecord = client.get(null, key, BLOCK_MAP_BIN);
 						blockMap = (byte[]) newRecord.getValue(BLOCK_MAP_BIN);
-						bitwiseOperations.setBit(blockMap, blockNum);
+//System.out.printf("%s %s: re-read: %d, %s %d\n", Thread.currentThread().getName(), key, newRecord.generation, bitwiseOperations.toString(blockMap), blockNum);
+						blockMap = bitwiseOperations.setBit(blockMap, blockNum);
+//System.out.printf("%s %s: new value: %d, %s\n", Thread.currentThread().getName(), key, newRecord.generation, bitwiseOperations.toString(blockMap));
 						blockMapGeneration = newRecord.generation;
 						break;
 						
@@ -1289,7 +1377,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			Record result = client.operate(writePolicy, key, obtainLock, addToMap, releaseLock);
 			int recordsInBlock = result.getInt(dataBinName);
 			if (recordsInBlock > this.recordThreshold) {
-				splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, value.getObject(), blockMap, blockMapGeneration);
+				return splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, value.getObject(), blockMap, blockMapGeneration);
 			}
 			return true;
 		}
@@ -1340,11 +1428,19 @@ public class AdaptiveMap implements IAdaptiveMap {
 		Key key = getCombinedKey(recordKey, 0);
 
 		try {
-			Record result = client.operate(writePolicy, key, obtainLock, addToMap, getBlockMap, releaseLock);
-			int recordsInBlock = result.getInt(dataBinName);
-			if (recordsInBlock > this.recordThreshold) {
-				// TODO: Again, is it better to read the whole record whilst we have it, or re-read it
-				splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), (byte[])result.getValue(BLOCK_MAP_BIN), result.generation);
+			while (true) {
+				Record result = client.operate(writePolicy, key, obtainLock, addToMap, getBlockMap, releaseLock);
+				int recordsInBlock = result.getInt(dataBinName);
+				if (recordsInBlock > this.recordThreshold) {
+					// TODO: Again, is it better to read the whole record whilst we have it, or re-read it
+					if (splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), (byte[])result.getValue(BLOCK_MAP_BIN), result.generation)) {
+						// If this returns true, the operation was successful. If it returns false, the block split before we could obtain the lock, so retry
+						break;
+					}
+				}
+				else {
+					break;
+				}
 			}
 		}
 		catch (AerospikeException ae) {
@@ -1375,8 +1471,9 @@ public class AdaptiveMap implements IAdaptiveMap {
 						}
 						else {
 							// We own the lock, but must split this block
-							splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), blockMap, record.generation, (Map<Object,Object>)record.getMap(dataBinName), record.getTimeToLive());
-							break;
+							if (splitBlockAndInsert(writePolicy, recordKey, 0, mapKey, mapKeyDigest, value.getObject(), blockMap, record.generation, (Map<Object,Object>)record.getMap(dataBinName), record.getTimeToLive())) {
+								break;
+							}
 						}
 					}
 				}
@@ -1420,13 +1517,19 @@ public class AdaptiveMap implements IAdaptiveMap {
 		Record record = client.get(null, key);
 		if (record != null) {
 			
-			 client.delete(null, key);
+			if (forceDurableDeletes) {
+				writePolicy.durableDelete = true;
+			}
+			client.delete(writePolicy, key);
 			// Now delete all the sub-blocks.
 			byte[] bitmap = (byte[]) record.getValue(BLOCK_MAP_BIN);
 
 			List<Integer> blockList = new ArrayList<>();
 			computeBlocks(bitmap, 0, blockList);
 			
+			writePolicy.maxRetries = 5;
+			writePolicy.totalTimeout = 5000;
+			writePolicy.sleepBetweenRetries = 250;
 			for (int block : blockList) {
 				if (block > 0) {
 					client.delete(writePolicy, getCombinedKey(recordKeyValue, block));

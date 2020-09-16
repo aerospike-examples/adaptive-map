@@ -36,6 +36,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.aerospike.client.AerospikeClient;
+import com.aerospike.client.AerospikeException;
 import com.aerospike.client.Key;
 import com.aerospike.client.Operation;
 import com.aerospike.client.Record;
@@ -46,6 +47,7 @@ import com.aerospike.client.cdt.MapPolicy;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.cdt.MapWriteFlags;
 import com.aerospike.client.command.Buffer;
+import com.aerospike.client.policy.WritePolicy;
 
 
 public class TestAdaptiveMap {
@@ -107,7 +109,10 @@ public class TestAdaptiveMap {
 		final Key recordKey = new Key(NAMESPACE, SET, recordKeyStr);
 		final String mapKey = "mapKey";
 		// Clean up after previous runs
-		client.delete(null, recordKey);
+		WritePolicy wp = new WritePolicy();
+		wp.durableDelete = true;
+		
+		client.delete(wp, recordKey);
 		
 		map.put(null, recordKeyStr, mapKey, null, Value.get("test"));
 		

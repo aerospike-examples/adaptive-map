@@ -103,4 +103,15 @@ public class BitwiseData {
 		this.data = value ? setBit(this.data, bitNum) : clearBit(this.data, bitNum);
 		return this;
 	}
-}
+	
+	public String toString(byte[] bytes) {
+		StringBuffer sb = new StringBuffer();
+		for (int i = 0; i < bytes.length * 8; i++) {
+			sb.append(getBit(bytes, i) ? 1 : 0);
+			if ((i%8) == 7) {
+				sb.append(' ');
+			}
+		}
+		return sb.toString();
+	}
+}	
