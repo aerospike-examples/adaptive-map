@@ -1023,6 +1023,76 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 	}
 
+	private Record waitForLockRelease(LockType lockType, Key key, long timeoutInMs) {
+		long now = new Date().getTime();
+		long timeoutEpoch = now + timeoutInMs;
+		String id = this.getLockId();
+		int currentDelay = 1;
+		while (true) {
+			try {
+				Record record = client.get(null, key, lockType.getBinName());
+				if (record == null) {
+					return null;
+				}
+				Map<String, List<Object>> lockData = (Map<String, List<Object>>) record.getMap(lockType.getBinName());
+				if (lockData == null || lockData.isEmpty()) {
+					// The block is not locked, done!
+					return record;
+				}
+				else {
+					// The lock is held, see if a timeout has occurred on the lock
+					List<Object> lockInfo = lockData.get(LOCK_MAP_ENTRY);
+					long lockExpiry = (long) lockInfo.get(1);
+					now = new Date().getTime();
+					if (now < lockExpiry) {
+						if (timeoutInMs > 0 && now >= timeoutEpoch) {
+							// It's taken too long to get the lock
+							throw new AerospikeException(ResultCode.TIMEOUT, false);
+						}
+						else {
+							// Wait for 1ms and retry
+							wait(currentDelay);
+							if (currentDelay < 8) {
+								currentDelay *= 2;
+							}
+						}
+					}
+					else {
+						// The lock has expired. Try to force removing the lock with a gen check
+						WritePolicy writePolicy = new WritePolicy();
+						writePolicy.generation = record.generation;
+						writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
+						writePolicy.sendKey = this.sendKey;
+						
+						Operation dataOperation = Operation.get(dataBinName);
+						Operation clearMapOperation = Operation.put(Bin.asNull(lockType.binName));
+						try {
+							record = client.operate(writePolicy, key, clearMapOperation, dataOperation);
+							return record;
+						}
+						catch (AerospikeException ae2) {
+							if (ae2.getResultCode() == ResultCode.GENERATION_ERROR) {
+								// A different thread obtained the lock before we were able to do so, retry
+							}
+							else {
+								throw ae2;
+							}
+						}
+					}
+				}
+			}
+			catch (AerospikeException ae) {
+				if (ae.getResultCode() == ResultCode.GENERATION_ERROR) {
+					// We tried to obtain the lock which was not set, but a write occurred updating the block. Wait and try
+					wait(1);
+				}
+				else {
+					throw ae;
+				}
+			}
+		}
+	}
+
 	/**
 	 * Acquire a lock used for splitting an existing block into 2. Since this is an existing block, the lock must exist
 	 * unless the entire block has TTLd out, or just been removed after a block has split.
@@ -1377,10 +1447,13 @@ public class AdaptiveMap implements IAdaptiveMap {
 		catch (AerospikeException ae) {
 			switch (ae.getResultCode()) {
 				case ResultCode.ELEMENT_EXISTS:
+					// The block is locked. Wait for the lock to expire or be removed
+					waitForLockRelease(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
+					return false;
+					
 				case ResultCode.KEY_NOT_FOUND_ERROR:
-					// Either: The block is locked and in the process of splitting (ELEMENT_EXISTS) or
-					// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
-					// must re-read the root record and re-attempt the operation.
+					// The record has split and been removed (KEY_NOT_FOUND_ERROR).  
+					// Re-read the root record and re-attempt the operation.
 					return false;
 				default:
 					throw ae;

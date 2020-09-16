@@ -20,9 +20,9 @@ public class PerformanceTest {
 	public static final String SET = "perfTest";
 	public static final String MAP_BIN = "map";
 	public static final int THREADS = 60;
-	public static final int NUM_KEYS = 1_000_000;
-	public static final int TOTAL_KEYS = 1000_000_000;
-	public static final int BLOCK_SPLIT_SIZE = 1_000;
+	public static final int NUM_KEYS = 1_000;
+	public static final int TOTAL_KEYS = 1_000_000;
+	public static final int BLOCK_SPLIT_SIZE = 500;
 	
 	private AtomicLong counter = new AtomicLong();
 	private AtomicLong errorCounter = new AtomicLong();
@@ -83,7 +83,7 @@ public class PerformanceTest {
 		IAerospikeClient client = new AerospikeClient(null, HOST, 3000);
 		AdaptiveMap map = new AdaptiveMap(client, NAMESPACE, SET, MAP_BIN, new MapPolicy(MapOrder.KEY_ORDERED, 0), false, BLOCK_SPLIT_SIZE);
 		
-		client.truncate(null, NAMESPACE, SET, null);
+//		client.truncate(null, NAMESPACE, SET, null);
 		
 		for (int i = 0; i < THREADS; i++) {
 			executors.submit(new Runner(map, i));
