@@ -345,6 +345,55 @@ public class TestAdaptiveMap {
 	}
 	
 	@Test
+	public void testCountNoSplit() {
+		System.out.printf("\n*** testCountNoSplit ***\n");
+		IAdaptiveMap map = adaptiveMapWithValueKey;
+		final String recordKeyStr = "key1";
+		final String mapKey = "mapKey";
+		// Clean up after previous runs
+		client.truncate(null, NAMESPACE, SET, null);
+
+		long now = System.nanoTime();
+		long count = (long)(MAP_SPLIT_SIZE / 2);
+		for (int i = 0; i < count; i++) {
+			String mapKeyToUse = mapKey + i;
+			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(values));
+		}
+		long time = System.nanoTime() - now;
+		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
+		now = System.nanoTime();
+		int mapCount = map.countAll(null, recordKeyStr);
+		time = System.nanoTime() - now;
+		System.out.printf("map.count returned: %s in %.1fms\n", mapCount, time/1000000.0);
+		assertEquals(mapCount, count);
+	}
+	
+	@Test
+	public void testCountSplit() {
+		System.out.printf("\n*** testCountSplit ***\n");
+		IAdaptiveMap map = adaptiveMapWithValueKey;
+		final String recordKeyStr = "key1";
+		final String mapKey = "mapKey";
+		// Clean up after previous runs
+		client.truncate(null, NAMESPACE, SET, null);
+
+		long now = System.nanoTime();
+		long count = (long)(MAP_SPLIT_SIZE * 3);
+		for (int i = 0; i < count; i++) {
+			String mapKeyToUse = mapKey + i;
+			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(values));
+		}
+		long time = System.nanoTime() - now;
+		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
+		int mapCount = map.countAll(null, recordKeyStr);
+		time = System.nanoTime() - now;
+		System.out.printf("map.count returned: %s in %.1fms\n", mapCount, time/1000000.0);
+		assertEquals(count, mapCount);
+	}
+	
+	@Test
 	public void testMultiRecordGet() {
 		System.out.printf("\n*** testMultiRecordGet ***\n");
 		// Clean up after previous runs

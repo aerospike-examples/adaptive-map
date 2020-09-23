@@ -43,7 +43,6 @@ import com.aerospike.client.cdt.MapPolicy;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.cdt.MapWriteFlags;
 import com.aerospike.client.cluster.Node;
-import com.aerospike.client.operation.BitOperation;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.GenerationPolicy;
 import com.aerospike.client.policy.Policy;
@@ -426,6 +425,67 @@ public class AdaptiveMap implements IAdaptiveMap {
 		return recordSetToMap(records);
 	}
 
+	/**
+	 * Get a count of all of the records associated with the passed keyValue.
+	 */
+	@Override
+	public int countAll(WritePolicy policy, String keyValue) {
+		// TODO: refactor this to the Async API.
+		Key rootKey = new Key(namespace, setName, keyValue);
+		Record result = client.operate(policy, rootKey, Operation.get(BLOCK_MAP_BIN), MapOperation.getByIndexRange(this.dataBinName, 0, MapReturnType.COUNT));
+
+		if (result != null) {
+			byte[] bitmap = (byte[]) result.getValue(BLOCK_MAP_BIN);
+			if (bitwiseOperations.getBit(bitmap, 0)) {
+
+				int count = 0;
+				// This block has been split, the results are in the sub-blocks
+				List<Integer> blockList = new ArrayList<>();
+				computeBlocks(bitmap, 0, blockList);
+				Set<Integer> blocksInDoubt = new HashSet<>();
+				
+				while (blockList.size() > 0)  {
+					for (int thisBlock : blockList) {
+						Record mapCount = client.operate(null, getCombinedKey(keyValue, thisBlock), MapOperation.getByIndexRange(this.dataBinName, 0, MapReturnType.COUNT));
+						
+						if (mapCount == null) {
+							// This has potentially split
+							blocksInDoubt.add(blockList.get(count));
+						}
+						else {
+							count += mapCount.getInt(this.dataBinName);
+						}
+					}
+					
+					blockList.clear();
+					if (blocksInDoubt.size() > 0) {
+						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split 
+						// between the time we read the original bitmap and when we read this record)
+						Key key = new Key(namespace, setName, keyValue);
+						Record rootRecord = client.get(null, key, BLOCK_MAP_BIN);
+						if (rootRecord != null) {
+							byte[] blocks = (byte [])rootRecord.getValue(BLOCK_MAP_BIN);
+							for (Integer blockNum : blocksInDoubt) {
+								if (bitwiseOperations.getBit(blocks, blockNum)) {
+									// This has split, add it to the next read. Don't update the block list
+									// as this is the job of the writing process.
+									blockList.add(2*blockNum+1);
+									blockList.add(2*blockNum+2);
+								}
+							}
+						}
+					}
+				}
+				return count;
+				
+			}
+			else {
+				// This block exists and has not been split, therefore it contains the results.
+				return result.getInt(this.dataBinName);
+			}
+		}
+		return 0;
+	}
 	
 	private static class KeyBlockContainer {
 		String keyValue;

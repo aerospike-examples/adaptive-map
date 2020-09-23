@@ -87,4 +87,8 @@ public interface IAdaptiveMap {
 	public Object get(String recordKeyValue, long mapKey);
 	public Object get(String recordKeyValue, String mapKey);
 	public Object get(String recordKeyValue, byte[] digest);
+	/**
+	 * Get a count of all of the records associated with the passed keyValue.
+	 */
+	int countAll(WritePolicy policy, String keyValue);
 }

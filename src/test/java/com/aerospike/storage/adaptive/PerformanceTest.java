@@ -20,9 +20,9 @@ public class PerformanceTest {
 	public static final String SET = "perfTest";
 	public static final String MAP_BIN = "map";
 	public static final int THREADS = 60;
-	public static final int NUM_KEYS = 1_000;
-	public static final int TOTAL_KEYS = 1_000_000;
-	public static final int BLOCK_SPLIT_SIZE = 500;
+	public static final int NUM_KEYS = 100_000;
+	public static final int TOTAL_KEYS = 100_000_000;
+	public static final int BLOCK_SPLIT_SIZE = 50;
 	
 	private AtomicLong counter = new AtomicLong();
 	private AtomicLong errorCounter = new AtomicLong();
