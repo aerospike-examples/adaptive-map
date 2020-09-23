@@ -36,7 +36,6 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.aerospike.client.AerospikeClient;
-import com.aerospike.client.AerospikeException;
 import com.aerospike.client.Key;
 import com.aerospike.client.Operation;
 import com.aerospike.client.Record;
@@ -391,6 +390,35 @@ public class TestAdaptiveMap {
 		time = System.nanoTime() - now;
 		System.out.printf("map.count returned: %s in %.1fms\n", mapCount, time/1000000.0);
 		assertEquals(count, mapCount);
+	}
+	
+	@Test
+	public void testSplitOnRecordTooBig() {
+		System.out.printf("\n*** testSplitOnRecordTooBig ***\n");
+		// Clean up after previous runs
+		client.truncate(null, NAMESPACE, SET, null);
+
+		final int COUNTER = 5_000;
+		IAdaptiveMap map = new AdaptiveMap(client, NAMESPACE, SET, MAP_BIN, new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT), false, COUNTER);
+		final String recordKeyStr = "key1";
+		final String mapKey = "mapKey";
+		String data = "1234567890abcdef";
+		for (int i = 0; i <= 6; i++) {
+			data = data + data;
+		}
+
+		long now = System.nanoTime();
+		for (int i = 0; i < COUNTER; i++) {
+			String mapKeyToUse = mapKey + i;
+			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(data));
+		}
+		long time = System.nanoTime() - now;
+		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", COUNTER, (time/1000000.0), (time/1000000.0)/COUNTER);
+		now = System.nanoTime();
+		int mapCount = map.countAll(null, recordKeyStr);
+		time = System.nanoTime() - now;
+		System.out.printf("map.count returned: %s in %.1fms\n", mapCount, time/1000000.0);
+		assertEquals(COUNTER, mapCount);
 	}
 	
 	@Test

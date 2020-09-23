@@ -67,7 +67,18 @@ import com.aerospike.client.util.Crypto;
  */
 @SuppressWarnings("serial")
 public class AdaptiveMap implements IAdaptiveMap {
+	/** The value to put in the map when the record is locked */
 	private static final String LOCK_MAP_ENTRY = "locked";
+	/** 
+	 * When the record in unlocked we need a map entry which is exactly the same size as the locked entry. This effectively
+	 * reserves space in the record -- if we wish to split on RECORD_TOO_BIG exceptions, there is a possibility that the 
+	 * underlying record will not have space to hold a lock value, forcing an unsplittable block.
+	 * <p>
+	 * For example, consider a record which is 5 bytes under the split limit. If a 1kB write comes in, it will force the 
+	 * record to split, which will need to obtain the lock. If there is no space reserved for the lock, this lock will fail
+	 * again with RECORD_TOO_BIG which means no more items can be inserted into this record.
+	 */
+	private static final String UNLOCK_MAP_ENTRY = "unlckd";
 
 	/** The name of the bin in which to store data */
 	private final String dataBinName;
@@ -77,6 +88,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * key the lock is held, if the map is empty or does not exist, the lock is not held.
 	 */
 	private static final String LOCK_BIN = "lock";
+	
 	/**
 	 * The name of the bin on the root block used to hold the block bitmap. The bitmap determines if a particular block has
 	 * been split -- a 1 in the bitmap for the block says that the block has split.
@@ -831,6 +843,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 	private String getLockId() {
 		return ID + "-" + Thread.currentThread().getId();
 	}
+	
+	private String getUnlockPlaceholder() {
+		return ID + "-" + Long.MAX_VALUE;
+	}
+	
 	private Operation getObtainLockOperation(String id, long now) {
 		if (id == null) {
 			id = getLockId();
@@ -851,6 +868,17 @@ public class AdaptiveMap implements IAdaptiveMap {
 		return MapOperation.removeByValueRange(LOCK_BIN, Value.get(startData), Value.get(endData), MapReturnType.RANK);
 	}
 	
+	private Operation removeUnlockedTagOperation() {
+		return MapOperation.removeByKey(LOCK_BIN, Value.get(UNLOCK_MAP_ENTRY), MapReturnType.NONE);
+	}
+
+	private Operation getUnlockedTagOperation() {
+		List<Object> data = Arrays.asList(new Object[] { getUnlockPlaceholder(), Long.MAX_VALUE });
+		MapPolicy policy = new MapPolicy(MapOrder.UNORDERED, 0);
+		return MapOperation.put(policy, LOCK_BIN, Value.get(UNLOCK_MAP_ENTRY), Value.get(data));
+	}
+	
+
 	private enum LockType {
 		SUBDIVIDE_BLOCK (LOCK_BIN);
 //		ROOT_BLOCK_SPLIT_IN_PROGRESS (ROOT_BLOCK_LOCK);
@@ -1175,11 +1203,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 				wp.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 				wp.sendKey = this.sendKey;
 				if (dataOperation != null) {
-					Record record = client.operate(wp, key, getObtainLockOperation(id, now), Operation.get(BLOCK_MAP_BIN), dataOperation);
+					Record record = client.operate(wp, key, getObtainLockOperation(id, now), removeUnlockedTagOperation(), Operation.get(BLOCK_MAP_BIN), dataOperation);
 					return record;
 				}
 				else {
-					client.operate(wp, key, getObtainLockOperation(id, now));
+					client.operate(wp, key, getObtainLockOperation(id, now), removeUnlockedTagOperation());
 					return null;
 				}
 			}
@@ -1299,6 +1327,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 * <p>
 	 * These operations are designed in this order so that if the process dies in the middle of them, the next attempt to re-perform them
 	 * will succeed without having to rollback any of these steps.
+	 * @param Write
 	 * @param recordKey
 	 * @param blockNum
 	 * @param mapKey
@@ -1309,7 +1338,33 @@ public class AdaptiveMap implements IAdaptiveMap {
 	private boolean splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration) {
 		return splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, dataValue, blockMap, blockMapGeneration, null, 0);
 	}
-	
+
+	/**
+	 * A block has overflowed, it must be subdivided into 2 smaller blocks. The general principal is:<br>
+	 * <ol>
+	 * <li>Obtain the block lock on the record and read all of its data. This prevents other data being written whilst the lock is held</li>
+	 * <li>Split the data on the block into 2 set of record</li>
+	 * <li>Write the new records</li>
+	 * <li>Obtain the block map lock, update the block map, unlock the block map lock</li>
+	 * <li>Remove the split block (and hence remove the lock which exists on this record too)</li>
+	 * </ol>
+	 * <p>
+	 * These operations are designed in this order so that if the process dies in the middle of them, the next attempt to re-perform them
+	 * will succeed without having to rollback any of these steps.
+	 * @param writePolicy - The write policy to use, useful for retries, etc. Some parts of this policy may be overwritten by this method.
+	 * @param recordKey -  The base key of the record. This is not the block to split. For example, if records are being inserted into "baseKey1" object
+	 * 						and this is block baseKey1:12, this string should be "baseKey1"
+	 * @param blockNum - The block number to split
+	 * @param mapKey - The key to insert into the map.
+	 * @param mapKeyDigest - The digest of the map key. If this parameter is null, the <code>hashFunction</code> will be used to compute it.
+	 * @param dataValue - The value to insert into the map.
+	 * @param blockMap - The current block map. Can be <code>null</code>, which will force a database read.
+	 * @param blockMapGeneration - The generation of the block map. If this value is < 0 the blockMap parameter will be ignored and the value re-read from the database
+	 * @param data - The data of the record. If this is <code>null</code> it will be read from the database 
+	 * @param dataTTL - the TTL of this subblock. If the <code>data</code> parameter above is <code>null</code>, this will be read from the record along with the data
+	 * 					and the passed value ignored.
+	 * @return <code>true</code> if the operation was successful, <code>false</code> if the operation failed but could conceivably succeed on a retry, eg a race condition.
+	 */
 	@SuppressWarnings("unchecked")
 	private boolean splitBlockAndInsert(WritePolicy writePolicy, String recordKey, int blockNum, Object mapKey, byte[] mapKeyDigest, Object dataValue, byte[] blockMap, int blockMapGeneration, Map<Object, Object> data, int dataTTL) {
 		// We will always need a digest here
@@ -1414,7 +1469,8 @@ public class AdaptiveMap implements IAdaptiveMap {
 		for (Integer newBlockNum : dataHalves.keySet()) {
 			// Note: use the map operations to insert the data, otherwise it's possible to get duplicate keys in maps
 			//client.put(wp, getCombinedKey(recordKey, newBlockNum), new Bin(dataBinName, dataHalves.get(newBlockNum)));
-			client.operate(writePolicy, getCombinedKey(recordKey, newBlockNum), MapOperation.putItems(mapPolicy, dataBinName, dataHalves.get(newBlockNum)));
+			client.operate(writePolicy, getCombinedKey(recordKey, newBlockNum), 
+					MapOperation.putItems(mapPolicy, dataBinName, dataHalves.get(newBlockNum)), getUnlockedTagOperation());
 		}
 		
 		// The sub-records now exist, update the bitmap and delete this record
@@ -1515,6 +1571,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 					// The record has split and been removed (KEY_NOT_FOUND_ERROR).  
 					// Re-read the root record and re-attempt the operation.
 					return false;
+					
+				case ResultCode.RECORD_TOO_BIG:
+					// This record is too big, try to resplit it.
+					return splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, mapKeyDigest, value.getObject(), blockMap, blockMapGeneration);
+					
 				default:
 					throw ae;
 			}
