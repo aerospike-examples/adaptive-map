@@ -32,6 +32,14 @@
 			<artifactId>junit</artifactId>
 			<version>4.4</version>
 		</dependency>
+		<!-- Commons CLI needed for command line parsing on utilities -->
+		<!-- https://mvnrepository.com/artifact/commons-cli/commons-cli -->
+		<dependency>
+		    <groupId>commons-cli</groupId>
+		    <artifactId>commons-cli</artifactId>
+		    <version>1.4</version>
+		</dependency>
+				
 	</dependencies>
 	<build>
 		<plugins>
@@ -44,7 +52,7 @@
 					<target>1.8</target>
 				</configuration>
 			</plugin>
-			<!-- >plugin>
+			<plugin>
 				<artifactId>maven-assembly-plugin</artifactId>
 				<configuration>
 					<descriptorRefs>
@@ -53,7 +61,7 @@
 					<archive>
 						<manifest>
 							<addClasspath>true</addClasspath>
-							<mainClass>com.aerospike.storage.adaptive.MainTestCass</mainClass>
+							<mainClass>com.aerospike.storage.adaptive.utils.CountRecords</mainClass>
 						</manifest>
 					</archive>
 					<finalName>${project.artifactId}-${project.version}-full</finalName>
@@ -68,7 +76,7 @@
 						</goals>
 					</execution>
 				</executions>
-			</plugin -->
+			</plugin>
 		</plugins>
 		<resources>
 			<resource>

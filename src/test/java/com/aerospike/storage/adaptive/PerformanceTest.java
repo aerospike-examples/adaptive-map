@@ -12,6 +12,7 @@ import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Value;
 import com.aerospike.client.cdt.MapOrder;
 import com.aerospike.client.cdt.MapPolicy;
+import com.aerospike.client.policy.WritePolicy;
 
 public class PerformanceTest {
 	
@@ -20,18 +21,19 @@ public class PerformanceTest {
 	public static final String SET = "perfTest";
 	public static final String MAP_BIN = "map";
 	public static final int THREADS = 60;
-	public static final int NUM_KEYS = 100_000;
-	public static final int TOTAL_KEYS = 100_000_000;
-	public static final int BLOCK_SPLIT_SIZE = 50;
+	public static final int NUM_KEYS = 1000;
+	public static final int TOTAL_KEYS = 1_000_000;
+	public static final int BLOCK_SPLIT_SIZE = 100;
 	
 	private AtomicLong counter = new AtomicLong();
 	private AtomicLong errorCounter = new AtomicLong();
+	private AtomicLong keyCounter = new AtomicLong();
 	private AtomicLongArray lastWriteTime = new AtomicLongArray(THREADS);
 	private volatile boolean terminate = false;
 	
-	public String getKey(int id) {
-		String numberKey = "0000" + id; 
-		return "key" + (numberKey.substring(numberKey.length()-4));
+	public String getKey(long id) {
+		String numberKey = "0000000000" + id; 
+		return "key" + (numberKey.substring(numberKey.length()-10));
 	}
 
 	public ExecutorService executors = Executors.newFixedThreadPool(THREADS);
@@ -49,11 +51,16 @@ public class PerformanceTest {
 		
 		@Override
 		public void run() {
+			WritePolicy writePolicy = new WritePolicy();
+			writePolicy.maxRetries = 5;
+			writePolicy.sleepBetweenRetries = 200;
+			writePolicy.totalTimeout = 5000;
 			while (!terminate) {
 				int key = random.nextInt(NUM_KEYS);
-				int mapKey = random.nextInt();
+				//int mapKey = random.nextInt();
+				long mapKey = keyCounter.incrementAndGet();
 				try {
-					map.put(null, "Key-" + key, getKey(mapKey), null, Value.get(counter.get()));
+					map.put(writePolicy, "Key-" + key, getKey(mapKey), null, Value.get(counter.get()));
 					lastWriteTime.set(id, System.nanoTime());
 					counter.incrementAndGet();
 				}
@@ -66,6 +73,12 @@ public class PerformanceTest {
 		}
 	}
 	
+	/**
+	 * Get the health of the threads. If a thread hasn't processed a transaction in more than 1 second, it is flagged 
+	 * as a problem thread.
+	 * @param now
+	 * @return
+	 */
 	public String getThreadHealth(long now) {
 		StringBuffer buffer = new StringBuffer(THREADS);
 		for (int i = 0; i < THREADS; i++) {
@@ -78,8 +91,8 @@ public class PerformanceTest {
 		}
 		return buffer.toString();
 	}
+	
 	public void begin() throws Exception {
-		
 		IAerospikeClient client = new AerospikeClient(null, HOST, 3000);
 		AdaptiveMap map = new AdaptiveMap(client, NAMESPACE, SET, MAP_BIN, new MapPolicy(MapOrder.KEY_ORDERED, 0), false, BLOCK_SPLIT_SIZE);
 		
@@ -100,9 +113,11 @@ public class PerformanceTest {
 				break;
 			}
 		}
-		
+		Thread.sleep(2000);
+		System.out.printf("Done: Success: %,9d  Failed: %,9d\n", counter.get(), errorCounter.get());
 		client.close();
 	}
+	
 	public static void main(String[] args) throws Exception {
 		new PerformanceTest().begin();
 	}
