@@ -234,6 +234,8 @@ public class CountRecords {
 			// security permissions on the server and might lower the utility of this function
 			AtomicLong counter = new AtomicLong();
 			ScanPolicy scanPolicy = new ScanPolicy();
+			scanPolicy.concurrentNodes = true;
+			scanPolicy.maxConcurrentNodes = 0;
 			client.scanAll(scanPolicy, namespace, setName, new ScanCallback() {
 				
 				@Override
