@@ -16,6 +16,12 @@ import com.aerospike.client.policy.ScanPolicy;
 import com.aerospike.storage.adaptive.AdaptiveMap;
 import com.aerospike.storage.adaptive.BitwiseData;
 
+/**
+ * Count the number of records
+ * <pre>java -jar adaptive-map-1.0-full.jar count -n test -s testSet -b map -k key1 -e</pre>
+ * @author timfaulkes
+ *
+ */
 public class CountCommand extends Command {
 
 	private String binName;
