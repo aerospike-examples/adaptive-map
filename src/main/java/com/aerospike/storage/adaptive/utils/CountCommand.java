@@ -19,6 +19,26 @@ import com.aerospike.storage.adaptive.BitwiseData;
 /**
  * Count the number of records
  * <pre>java -jar adaptive-map-1.0-full.jar count -n test -s testSet -b map -k key1 -e</pre>
+ * 
+ * The "explain" option (-e) will print a hierachy of the splits of the blocks:
+ * <pre>
+ * key key1 has 100 members
+                                                                              0  
+                                       ---------------------------------------------------------------------------------
+                                      1                                                                               2  
+                   -----------------------------------------                                       -----------------------------------------
+                  3                                       4                                       5                                       6  
+         ---------------------                   ---------------------                   ---------------------                   ---------------------
+       -7-                 -8-                  9                   10                 -11-                 12                  13                  14 
+        9                   8                                                           10                                                             
+                                            -----------         -----------                             -----------         -----------         -----------
+                                          -19-      -20-      -21-      -22-                           25       -26-      -27-      -28-      -29-      -30-
+                                           9         5         7         10                                      7         6         5         4         9  
+                                                                                                      ------                                                  
+                                                                                                    -51- -52-                                                  
+                                                                                                     6    5                                                    
+
+ * </pre>
  * @author timfaulkes
  *
  */
@@ -55,12 +75,16 @@ public class CountCommand extends Command {
 		return level;
 	}
 	
-	private String getSpaces(int count) {
-		String spaces = "";
+	private String getChars(String thisChar, int count) {
+		String chars = "";
 		for (int i = 0; i < count; i++) {
-			spaces += " ";
+			chars += thisChar;
 		}
-		return spaces;
+		return chars;
+	}
+
+	private String getSpaces(int count) {
+		return getChars(" ", count);
 	}
 	
 	private String padToSize(int number, int size) {
@@ -134,9 +158,33 @@ public class CountCommand extends Command {
 		int blocksThisLevel = 1 << level;
 		int startBlockBottomLevel = getStartIndexOfBottomBlock(maxSplits);
 		int startBlock = blocksThisLevel - 1;
-		
 		StringBuffer sb = new StringBuffer();
-		
+
+		// -------------------------------------------------------
+		// First draw the links between our parent and our sibling
+		// -------------------------------------------------------
+		if (level > 0) {
+			for (int i = 0; i < blocksThisLevel; i+=2) {
+				int currentBlock = startBlock + i;
+				int middleOffsetFirst = getBlockMiddleOffset(currentBlock, startBlockBottomLevel, longestBlockLen);
+				int middleOffsetEnd = getBlockMiddleOffset(currentBlock+1, startBlockBottomLevel, longestBlockLen);
+				
+				// Insert spaces first
+				sb.append(getSpaces(middleOffsetFirst - sb.length()));
+				if (isLeafNode(bitwiseData, currentBlock) || isNonLeafNode(bitwiseData, currentBlock)) {
+					sb.append(getChars("-", middleOffsetEnd - middleOffsetFirst + 1));
+				}
+				else {
+					sb.append(getSpaces(middleOffsetEnd - middleOffsetFirst + 1));
+				}
+			}
+			System.out.println(sb.toString());
+		}
+
+		// -------------------------------------------------------
+		// Then draw the block number
+		// -------------------------------------------------------
+		sb = new StringBuffer();
 		boolean needToDrawLeafCounts = false;
 		for (int i = 0; i < blocksThisLevel; i++) {
 			int currentBlock = startBlock + i;
