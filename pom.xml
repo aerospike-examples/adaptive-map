@@ -40,7 +40,14 @@
 		    <version>1.4</version>
 		</dependency>
 				
-	</dependencies>
+		<!-- JSON parser for utilities -->
+		<!-- https://mvnrepository.com/artifact/com.googlecode.json-simple/json-simple -->
+		<dependency>
+		    <groupId>com.googlecode.json-simple</groupId>
+		    <artifactId>json-simple</artifactId>
+		    <version>1.1.1</version>
+		</dependency>
+		</dependencies>
 	<build>
 		<plugins>
 
@@ -61,7 +68,7 @@
 					<archive>
 						<manifest>
 							<addClasspath>true</addClasspath>
-							<mainClass>com.aerospike.storage.adaptive.utils.CountRecords</mainClass>
+							<mainClass>com.aerospike.storage.adaptive.utils.MapUtils</mainClass>
 						</manifest>
 					</archive>
 					<finalName>${project.artifactId}-${project.version}-full</finalName>
