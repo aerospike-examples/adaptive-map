@@ -1,5 +1,7 @@
 package com.aerospike.storage.adaptive.utils;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.cli.CommandLine;
@@ -11,10 +13,12 @@ import org.apache.commons.cli.ParseException;
 
 import com.aerospike.client.AerospikeClient;
 import com.aerospike.client.AerospikeException;
+import com.aerospike.client.Bin;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Key;
 import com.aerospike.client.Record;
 import com.aerospike.client.ScanCallback;
+import com.aerospike.client.Value;
 import com.aerospike.client.cdt.MapOperation;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.policy.ClientPolicy;
