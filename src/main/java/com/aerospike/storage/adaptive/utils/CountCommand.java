@@ -1,5 +1,6 @@
 package com.aerospike.storage.adaptive.utils;
 
+import java.io.File;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.cli.CommandLine;
@@ -8,11 +9,17 @@ import org.apache.commons.cli.Options;
 import com.aerospike.client.AerospikeException;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Key;
+import com.aerospike.client.Language;
 import com.aerospike.client.Record;
 import com.aerospike.client.ScanCallback;
+import com.aerospike.client.Value;
 import com.aerospike.client.cdt.MapOperation;
 import com.aerospike.client.cdt.MapReturnType;
+import com.aerospike.client.lua.LuaConfig;
 import com.aerospike.client.policy.ScanPolicy;
+import com.aerospike.client.query.ResultSet;
+import com.aerospike.client.query.Statement;
+import com.aerospike.client.task.RegisterTask;
 import com.aerospike.storage.adaptive.AdaptiveMap;
 import com.aerospike.storage.adaptive.BitwiseData;
 
@@ -47,6 +54,8 @@ public class CountCommand extends Command {
 	private String binName;
 	private String key;
 	private boolean explain;
+	private boolean useUdf;
+	private boolean shouldRegisterUdf;
 	
 	private boolean isNonLeafNode(BitwiseData data, int blockNum) {
 		return data.get(blockNum);
@@ -224,11 +233,30 @@ public class CountCommand extends Command {
 		}
 	}
 
+	private long countViaUdf(IAerospikeClient client, String namespace, String setName, String binName, boolean registerUdf) {
+        File udfFile = new File("src/main/resources/count.lua");
+        if (registerUdf) {
+    		LuaConfig.SourceDirectory = udfFile.getParent();
+            RegisterTask rt = client.register(null, udfFile.getPath(), udfFile.getName(), Language.LUA);
+            rt.waitTillComplete();
+        }
+		Statement stmt = new Statement();
+		stmt.setNamespace(namespace);
+		stmt.setSetName(setName);
+		stmt.setAggregateFunction("count", "countMapItems", Value.get(binName));
+
+		ResultSet rs = client.queryAggregate(null, stmt);
+		rs.next();
+		return (Long)rs.getObject();
+	}
+
 	@Override
 	protected void addSubCommandOptions(Options options) {
 		options.addRequiredOption("b", "bin", true, "Specifies the bin which contains the map data. (REQUIRED)");
 		options.addOption("k", "key", true, "Count sub-items associated with a specific record. If not provided, all records will be counted.");
 		options.addOption("e", "explain", false, "Explain the splits and counts for a single key record. Ignored if --key is not specified.");
+		options.addOption("u", "udf", false, "Use a UDF to count the records instead of a client-side scan. Ignored if --key is specified.");
+		options.addOption("r", "register", false, "Register the counting UDF. If not specified, assumes the UDF has already been registered. Ignored if --udf is not specified.");
 	}
 	
 	@Override
@@ -236,6 +264,8 @@ public class CountCommand extends Command {
 		this.binName = commandLine.getOptionValue("bin");
 		this.key = commandLine.getOptionValue("key");
 		this.explain = commandLine.hasOption("explain");
+		this.useUdf = commandLine.hasOption("udf");
+		this.shouldRegisterUdf = commandLine.hasOption("register");
 	}
 	
 	@Override
@@ -255,18 +285,25 @@ public class CountCommand extends Command {
 			// set which have a map associated with them.
 			// This approach is very costly in terms of network traffic. An aggregation function would be better but this requires different
 			// security permissions on the server and might lower the utility of this function
-			AtomicLong counter = new AtomicLong();
-			ScanPolicy scanPolicy = new ScanPolicy();
-			scanPolicy.concurrentNodes = true;
-			scanPolicy.maxConcurrentNodes = 0;
-			client.scanAll(scanPolicy, getNamespace(), getSetName(), new ScanCallback() {
-				
-				@Override
-				public void scanCallback(Key key, Record record) throws AerospikeException {
-					counter.addAndGet(record.getMap(binName).size());
-				}
-			}, binName);
-			System.out.printf("Total records in set %s: %,d\n", getSetName(), counter.get());
+			long count = 0;
+			if (useUdf) {
+				count = countViaUdf(client, getNamespace(), getSetName(), binName, shouldRegisterUdf);
+			}
+			else {
+				AtomicLong counter = new AtomicLong();
+				ScanPolicy scanPolicy = new ScanPolicy();
+				scanPolicy.concurrentNodes = true;
+				scanPolicy.maxConcurrentNodes = 0;
+				client.scanAll(scanPolicy, getNamespace(), getSetName(), new ScanCallback() {
+					
+					@Override
+					public void scanCallback(Key key, Record record) throws AerospikeException {
+						counter.addAndGet(record.getMap(binName).size());
+					}
+				}, binName);
+				count = counter.get();
+			}
+			System.out.printf("Total records in set %s: %,d\n", getSetName(), count);
 		}
 
 	}

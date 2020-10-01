@@ -94,3 +94,10 @@ Once a map splits, the original map which held that data is removed. This is tru
 
 _**Note:**_ The above description details some of the internal workings of the library. It should not matter to its use. Also, there are a lot of details glossed over, like locking which prevents 2 threads inserting 2 different records in the same block simultaneous and both causing it to split.
 
+#Testing Utilities#
+In the `com.aerospike.storage.adaptive.utils` package there are some test utilities which can be used to exercise Adadptive Maps without having to write code. These are:
+* Insert
+* Delete
+* Count
+
+The utilities are not particularly efficient as they create a JVM, instantiate an Aerospike client and connect to the cluster, then run one command and cleans itself up.
