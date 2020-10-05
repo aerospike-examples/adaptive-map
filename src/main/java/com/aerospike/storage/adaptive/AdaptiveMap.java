@@ -301,8 +301,12 @@ public class AdaptiveMap implements IAdaptiveMap {
 	 */
 	private TreeMap<Object, Object> recordSetToMap(Set<Record> recordSet) {
 		TreeMap<Object, Object> map = new TreeMap<>();
-		for (Record record : recordSet) {
-			map.putAll(record.getMap(dataBinName));
+		if (recordSet != null) {
+			for (Record record : recordSet) {
+				if (record != null) {
+					map.putAll(record.getMap(dataBinName));
+				}
+			}
 		}
 		return map;
 	}
@@ -433,8 +437,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 				// This block exists and has not been split, therefore it contains the results.
 				records.add(result);
 			}
+			return recordSetToMap(records);
 		}
-		return recordSetToMap(records);
+		else {
+			return null;
+		}
 	}
 
 	/**
