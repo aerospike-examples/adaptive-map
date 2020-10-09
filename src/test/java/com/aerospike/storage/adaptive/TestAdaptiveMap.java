@@ -60,18 +60,19 @@ public class TestAdaptiveMap {
 	private final String SET = "testAdapt";
 	private final String MAP_BIN = "mapBin";
 	private final int MAP_SPLIT_SIZE = 100;
-	
+
 	@Before
 	public void setUp() throws Exception {
-		 client = new AerospikeClient(HOST, 3000);
+		 String host = getEnvString("AS_HOST", HOST);
+		 client = new AerospikeClient(host, 3000);
 		 MapPolicy policy = new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT);
-		 
+
 		 // Use the underlying functions for restricted functions
 		 library = new AdaptiveMap(client, NAMESPACE, SET, MAP_BIN, policy, false, MAP_SPLIT_SIZE);
-		 
+
 		 // Set up the interface to use for primary operations
 		 adaptiveMapWithValueKey = library;
-		 
+
 		 adaptiveMapWithDigestKey = new AdaptiveMap(client, NAMESPACE, SET, MAP_BIN, policy, true, MAP_SPLIT_SIZE);
 	}
 
@@ -79,7 +80,13 @@ public class TestAdaptiveMap {
 	public void tearDown() throws Exception {
 		client.close();
 	}
-	
+
+	public String getEnvString(String var, String dflt) {
+		String val = (System.getenv(var) == null) ? dflt : System.getenv(var);
+		System.out.printf("%s:%s # export %s=<str> to modifiy value\n",var,val,var);
+		return val;
+	}
+
 	@Test
 	public void testDepthLevel() {
 		assertEquals(0, library.depthLevel(0));
@@ -102,7 +109,7 @@ public class TestAdaptiveMap {
 		assertEquals(4, library.computeBlockNumber(digest, new byte[] {0b00000011}));
 		assertEquals(9, library.computeBlockNumber(digest, new byte[] {0b00010011}));
 	}
-	
+
 	public void testInsert(IAdaptiveMap map) {
 		final String recordKeyStr = "key1";
 		final Key recordKey = new Key(NAMESPACE, SET, recordKeyStr);
@@ -110,14 +117,14 @@ public class TestAdaptiveMap {
 		// Clean up after previous runs
 		WritePolicy wp = new WritePolicy();
 		wp.durableDelete = true;
-		
+
 		client.delete(wp, recordKey);
-		
+
 		map.put(null, recordKeyStr, mapKey, null, Value.get("test"));
-		
+
 		assertTrue(client.exists(null, recordKey));
 		Object result = map.get(recordKeyStr, mapKey);
-		assertEquals("test", result);		
+		assertEquals("test", result);
 	}
 
 	@Test
@@ -143,7 +150,7 @@ public class TestAdaptiveMap {
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
-		
+
 		now = System.nanoTime();
 		for (int i = 0; i < count; i++) {
 			assertEquals(mapKey+i, map.get(recordKeyStr, mapKey+i));
@@ -171,14 +178,14 @@ public class TestAdaptiveMap {
 		client.truncate(null, NAMESPACE, SET, null);
 
 		long now = System.nanoTime();
-		long count = (long)(MAP_SPLIT_SIZE * 10);
+		long count = MAP_SPLIT_SIZE * 10;
 		for (int i = 0; i <  count; i++) {
 			String mapKeyToUse = mapKey + i;
 			map.put(null, recordKeyStr, mapKeyToUse, null, Value.get(mapKeyToUse));
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
-		
+
 		now = System.nanoTime();
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + i;
@@ -187,7 +194,7 @@ public class TestAdaptiveMap {
 		time = System.nanoTime() - now;
 		System.out.printf("Read %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
 	}
-	
+
 	@Test
 	public void testMultipleSplitMapValueKey() {
 		System.out.printf("\n*** testMultipleSplitMapValueKey ***\n");
@@ -207,7 +214,7 @@ public class TestAdaptiveMap {
 		client.truncate(null, NAMESPACE, SET, null);
 
 		long now = System.nanoTime();
-		long count = (long)(MAP_SPLIT_SIZE * 3);
+		long count = MAP_SPLIT_SIZE * 3;
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + i;
 			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
@@ -215,12 +222,12 @@ public class TestAdaptiveMap {
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
-		
+
 		// Pick a point 1/2 way through the map and retrieve the values > this value
 		long midpointStart = (count/2)*1000 - 500;
 		System.out.println("Returning all numbers > " + midpointStart);
 		Operation operation = MapOperation.getByValueRange(MAP_BIN, Value.get(Arrays.asList(new Object[] {midpointStart, "" })), null, MapReturnType.VALUE);
-		
+
 		now = System.nanoTime();
 		Set<Record> results = map.getAll(null, recordKeyStr, operation);
 		time = System.nanoTime() - now;
@@ -232,22 +239,22 @@ public class TestAdaptiveMap {
 			// Round the number up to the correct 1000
 			expectedNumbers.add(i);
 		}
-		
+
 		for (Record result : results) {
 			// Each value in the map is itself a list of (long, String)
 			List<List<Object>> list = (List<List<Object>>) result.getList(MAP_BIN);
 			for (List<Object> thisValue : list) {
 				long longVal = (long) thisValue.get(0);
 				String stringVal = (String) thisValue.get(1);
-				
+
 				assertTrue("Number " +longVal+" was not found in the expectd results", expectedNumbers.remove(longVal));
 			}
 		}
 		assertEquals("Not all expected numbers were found. Missing ones were: " + expectedNumbers, 0, expectedNumbers.size());
-		
+
 		System.out.printf("Read %d records with %d results in %.1fms\n", results.size(), resultCount, (time/1000000.0));
 	}
-	
+
 	@Test
 	public void testMultipleSplitAndReadAllValueKey() {
 		System.out.printf("\n*** testMultipleSplitAndReadAllValueKey ***\n");
@@ -271,7 +278,7 @@ public class TestAdaptiveMap {
 		client.truncate(null, NAMESPACE, SET, null);
 
 		long now = System.nanoTime();
-		long count = (long)(MAP_SPLIT_SIZE * 3);
+		long count = MAP_SPLIT_SIZE * 3;
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + numToDigits(i, 5);
 			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
@@ -279,9 +286,9 @@ public class TestAdaptiveMap {
 		}
 		long time = System.nanoTime() - now;
 		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", count, (time/1000000.0), (time/1000000.0)/count);
-		
+
 		now = System.nanoTime();
-		TreeMap<Object, Object> results = (TreeMap<Object, Object>) map.getAll(null, recordKeyStr);
+		TreeMap<Object, Object> results = map.getAll(null, recordKeyStr);
 		time = System.nanoTime() - now;
 
 		NavigableSet<Object> navSet = results.navigableKeySet();
@@ -296,7 +303,7 @@ public class TestAdaptiveMap {
 		assertEquals("Not enough records returned", count, i);
 		System.out.printf("Read %d results in %.1fms\n", results.size(), (time/1000000.0));
 	}
-	
+
 	@Test
 	public void testMultipleSplitAndReadValueKey() {
 		System.out.printf("\n*** testMultipleSplitAndReadValueKey ***\n");
@@ -309,7 +316,7 @@ public class TestAdaptiveMap {
 					, data.get(key));
 		}
 	}
-	
+
 	@Test
 	public void testDelete() {
 		System.out.printf("\n*** testDelete ***\n");
@@ -320,7 +327,7 @@ public class TestAdaptiveMap {
 		client.truncate(null, NAMESPACE, SET, null);
 
 		long now = System.nanoTime();
-		long count = (long)(MAP_SPLIT_SIZE * 3);
+		long count = MAP_SPLIT_SIZE * 3;
 		for (int i = 0; i < count; i++) {
 			String mapKeyToUse = mapKey + i;
 			List<Object> values = Arrays.asList(new Object[] { i*1000, mapKeyToUse });
@@ -337,12 +344,12 @@ public class TestAdaptiveMap {
 		time = System.nanoTime() - now;
 		System.out.printf("map.delete returned: %s in %.1fms\n", deletedRecord, time/1000000.0);
 		assertNotNull(deletedRecord);
-		
+
 		result = map.get(recordKeyStr, mapKeyToRemove);
 		System.out.println("Result after delete = " + result);
 		assertNull(result);
 	}
-	
+
 	@Test
 	public void testCountNoSplit() {
 		System.out.printf("\n*** testCountNoSplit ***\n");
@@ -437,18 +444,18 @@ public class TestAdaptiveMap {
 				map.put("i", i);
 				map.put("count", count++);
 				this.adaptiveMapWithValueKey.put(null, basePart + ":" + day, day + "-" + i, null, Value.get(map));
-				
+
 			}
 		}
 		String[] keys = new String[DAYS];
 		for (int i = 1; i <= DAYS; i++) {
 			keys[i-1] = basePart + ":" + i;
 		}
-		
+
 		long now = System.nanoTime();
 		TreeMap<Object, Object>[] records = this.adaptiveMapWithValueKey.getAll(null, keys);
 		long time = System.nanoTime() - now;
-		
+
 		int totalCount = 0;
 		Set<Long> counts = new HashSet<>();
 		for (int day = 1; day <= DAYS; day++) {
@@ -494,24 +501,24 @@ public class TestAdaptiveMap {
 
 			client.operate(null, key, MapOperation.put(mp, MAP_BIN, Value.get(Crypto.computeDigest("", Value.get(mapKeyToUse))), Value.get(values)));
 		}
-		
+
 		// Now get the map, iterate through the values, put them into a new map, re-insert them
 		Record r = client.get(null, key, MAP_BIN);
 		Map<Object, Object> data = (Map<Object, Object>) r.getMap(MAP_BIN);
 		dumpMap(data);
-		
+
 		r = client.operate(null, key, Operation.get(MAP_BIN));
 		data = (Map<Object, Object>) r.getMap(MAP_BIN);
 		dumpMap(data);
-		
+
 		Map<Object, Object> newMap = new HashMap<>();
 		for (Object k : data.keySet()) {
 			newMap.put(k, data.get(k));
 		}
 		client.put(null, key, new Bin(MAP_BIN, Value.get(newMap)));
-		
+
 		client.operate(null, key, MapOperation.put(mp, MAP_BIN, Value.get(Crypto.computeDigest("", Value.get(mapKey + 7))), Value.get(Arrays.asList(new Object[] {7000, "Second 7000" }))));
-		
+
 		System.out.println(client.operate(null, key, MapOperation.getByValueRange(MAP_BIN, Value.get(Arrays.asList(new Object[] {6500, "" })), null, MapReturnType.VALUE)));
 	}
 	*/
