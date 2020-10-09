@@ -48,14 +48,13 @@ public class TestAdaptiveUdfInvocation {
 		 		"function removeData(rec, mapKey, dataBin, expectedData, position)\n" +
 		 		"debug(\"MapKey = %s\", mapKey)\n" + 
 		 		"debug(\"expectedData = %s\", expectedData)\n" + 
-		 		"local changed = false\n" + 
 		 		"local aMap = rec[dataBin]\n" + 
 		 		"local listValue = aMap[mapKey]\n" +
 		 		"debug(\"%s\", listValue)\n" +
 		 		"if position > 0 and position <= list.size(listValue) and listValue[position] == expectedData then\n" +
 		 			"debug(\"Found element!\")\n" +
 		 			"map.remove(aMap, mapKey)\n"+
-		 			"rec[dataBin] = map\n"+
+		 			"rec[dataBin] = aMsap\n"+
 		 			"aerospike:update(rec)\n"+
 		 			"return 1\n" +
 		 		"end\n" + 
