@@ -91,4 +91,33 @@ public interface IAdaptiveMap {
 	 * Get a count of all of the records associated with the passed keyValue.
 	 */
 	int countAll(WritePolicy policy, String keyValue);
+	/**
+	 * Execute a UDF on an adaptive map for a select element. Extreme care must be taken when using this function -- the UDF should be allowed to
+	 * <ul>
+	 * <li>Read the element in the map</li>
+	 * <li>Remove the element from the map</li>
+	 * <li>Update the value associated with the key</li>
+	 * </ul>
+	 * The UDF should not insert new elements into the map -- no splitting will result if the UDF increases in items in the map. Also, if the map
+	 * increases in size as a result of calling this and overflows the record size this will not cause the map to split.
+	 * <p/>
+	 * The UDF will be called exactly once if the element is found in the adaptive map with the record containing the block which includes the mapKey.
+	 * If the adaptive map does not contain the element, the UDF will not be called at all.
+	 * <p/>
+	 * Note that no lock is obtained whilst the UDF is being called -- the atomic nature of UDFs in Aerospike will ensure atomicity. However, the 
+	 * explicit locks used by the adaptive map when splitting ARE observed.
+	 * <p/>
+	 * When the UDF is called, the first parameter will be the record (as always), the second parameter will be the key in the map which is desired,
+	 * the third parameter is the name of the map and the subsequent parameters will be those parameters passed as varargs to this function.
+	 * @param writePolicy
+	 * @param recordKeyValue
+	 * @param mapKey
+	 * @param digest
+	 * @param packageName
+	 * @param functionName
+	 * @param args
+	 * @return
+	 */
+	Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest,
+			String packageName, String functionName, Value[] args);
 }

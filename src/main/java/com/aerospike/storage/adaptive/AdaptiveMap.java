@@ -48,6 +48,7 @@ import com.aerospike.client.policy.GenerationPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.RecordExistsAction;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.client.query.PredExp;
 import com.aerospike.client.util.Crypto;
 
 /**
@@ -816,6 +817,10 @@ public class AdaptiveMap implements IAdaptiveMap {
 									// Either: The block is locked and in the process of splitting (ELEMENT_EXISTS) or
 									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
 									// must re-read the root record and re-attempt the operation.
+									try {
+										Thread.sleep(2);
+									} catch (InterruptedException e) {
+									}
 									continue;
 								default:
 									throw ae1;
@@ -845,8 +850,107 @@ public class AdaptiveMap implements IAdaptiveMap {
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, byte[] digest) {
 		return delete(writePolicy, recordKeyValue, null, digest);
 	}
-	
 
+	/**
+	 * Execute a UDF on an adaptive map for a select element. Extreme care must be taken when using this function -- the UDF should be allowed to
+	 * <ul>
+	 * <li>Read the element in the map</li>
+	 * <li>Remove the element from the map</li>
+	 * <li>Update the value associated with the key</li>
+	 * </ul>
+	 * The UDF should not insert new elements into the map -- no splitting will result if the UDF increases in items in the map. Also, if the map
+	 * increases in size as a result of calling this and overflows the record size this will not cause the map to split.
+	 * <p/>
+	 * The UDF will be called exactly once if the element is found in the adaptive map with the record containing the block which includes the mapKey.
+	 * If the adaptive map does not contain the element, the UDF will not be called at all.
+	 * <p/>
+	 * Note that no lock is obtained whilst the UDF is being called -- the atomic nature of UDFs in Aerospike will ensure atomicity. However, the 
+	 * explicit locks used by the adaptive map when splitting ARE observed.
+	 * <p/>
+	 * When the UDF is called, the first parameter will be the record (as always), the second parameter will be the key in the map which is desired,
+	 * the third parameter is the name of the map and the subsequent parameters will be those parameters passed as varargs to this function.
+	 * @param writePolicy
+	 * @param recordKeyValue
+	 * @param mapKey
+	 * @param digest
+	 * @param packageName
+	 * @param functionName
+	 * @param args
+	 * @return
+	 */
+	@Override
+	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
+		if (writePolicy == null) {
+			writePolicy = new WritePolicy();
+		}
+		// We must use an inbuilt predExp to see if the block is locked at the root level as this is not an operation
+		writePolicy.predExp = new PredExp[] {
+			 PredExp.stringVar("lock"),
+			 PredExp.stringValue(LOCK_MAP_ENTRY),
+			 PredExp.stringEqual(),
+			 PredExp.mapBin(LOCK_BIN),
+			 PredExp.mapKeyIterateOr("lock"),
+			 PredExp.not()
+		};
+		writePolicy.failOnFilteredOut = true;
+		Key key = getCombinedKey(recordKeyValue, 0);
+
+		Value[] values = new Value[args.length+2];
+		values[0] = Value.get(mapKey);
+		values[1] = Value.get(this.dataBinName);
+		for (int i = 0; i < args.length; i++) {
+			values[i+2] = args[i];
+		}
+		
+		try {
+			return client.execute(writePolicy, key, packageName, functionName, values);
+		}
+		catch (AerospikeException ae) {
+			if (ae.getResultCode() == ResultCode.FILTERED_OUT) {
+				// This block must have split, find the sub-block and re-execute
+				while (true) {
+					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
+					if (record == null) {
+						// The lock vanished from under us, maybe it TTLd out, just try again.
+						continue;
+					}
+					else {
+						// Check to see which block we should read
+						byte[] bitmap = (byte[])record.getValue(BLOCK_MAP_BIN);
+						if (digest == null) {
+							// We must have a digest now
+							digest = hashFunction.getHash(mapKey);
+						}
+						int block = computeBlockNumber(digest, bitmap);
+			
+						try {
+							return client.execute(writePolicy, getCombinedKey(recordKeyValue, block), packageName, functionName, values);
+						}
+						catch (AerospikeException ae1) {
+							switch (ae1.getResultCode()) {
+								case ResultCode.FILTERED_OUT:
+								case ResultCode.KEY_NOT_FOUND_ERROR:
+									// Either: The block is locked and in the process of splitting (FILTERED_OUT) or
+									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
+									// must re-read the root record and re-attempt the operation.
+									try {
+										Thread.sleep(2);
+									} catch (InterruptedException e) {
+									}
+									continue;
+								default:
+									throw ae1;
+							}
+						}
+					}
+				}
+			}
+			else {
+				throw ae;
+			}
+		}
+	}
+	
 	private String getLockId() {
 		return ID + "-" + Thread.currentThread().getId();
 	}
