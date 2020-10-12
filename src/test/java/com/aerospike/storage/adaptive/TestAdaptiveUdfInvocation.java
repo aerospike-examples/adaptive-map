@@ -26,6 +26,23 @@ public class TestAdaptiveUdfInvocation {
 	private final String MAP_BIN = "mapBin";
 	private final int MAP_SPLIT_SIZE = 100;
 
+	private static final String udfText =
+	 		"function removeData(rec, mapKey, dataBin, expectedData, position)\n" +
+	 		"debug(\"MapKey = %s\", mapKey)\n" + 
+	 		"debug(\"expectedData = %s\", expectedData)\n" + 
+	 		"local aMap = rec[dataBin]\n" + 
+	 		"local listValue = aMap[mapKey]\n" +
+	 		"debug(\"%s\", listValue)\n" +
+	 		"if position > 0 and position <= list.size(listValue) and listValue[position] == expectedData then\n" +
+	 			"debug(\"Found element!\")\n" +
+	 			"map.remove(aMap, mapKey)\n"+
+	 			"rec[dataBin] = aMap\n"+
+	 			"aerospike:update(rec)\n"+
+	 			"return 1\n" +
+	 		"end\n" + 
+	 		"return 0\n"+
+	 		"end";
+
 	@Test
 	public void callUdfBeforeSplit() {
 		 client = new AerospikeClient(HOST, 3000);
@@ -44,22 +61,6 @@ public class TestAdaptiveUdfInvocation {
 			 library.put(null, recordKey, "mapKey" + i, null, Value.get(value));
 		 }
 		 
-		 String udfText =
-		 		"function removeData(rec, mapKey, dataBin, expectedData, position)\n" +
-		 		"debug(\"MapKey = %s\", mapKey)\n" + 
-		 		"debug(\"expectedData = %s\", expectedData)\n" + 
-		 		"local aMap = rec[dataBin]\n" + 
-		 		"local listValue = aMap[mapKey]\n" +
-		 		"debug(\"%s\", listValue)\n" +
-		 		"if position > 0 and position <= list.size(listValue) and listValue[position] == expectedData then\n" +
-		 			"debug(\"Found element!\")\n" +
-		 			"map.remove(aMap, mapKey)\n"+
-		 			"rec[dataBin] = aMap\n"+
-		 			"aerospike:update(rec)\n"+
-		 			"return 1\n" +
-		 		"end\n" + 
-		 		"return 0\n"+
-		 		"end";
 		 RegisterTask task = client.registerUdfString(null, udfText, "testCode.lua", Language.LUA);
 		 task.waitTillComplete();
 
@@ -116,23 +117,6 @@ public class TestAdaptiveUdfInvocation {
 			 library.put(null, recordKey, "mapKey" + i, null, Value.get(value));
 		 }
 		 
-		 String udfText =
-		 		"function removeData(rec, mapKey, dataBin, expectedData, position)\n" +
-		 		"debug(\"MapKey = %s\", mapKey)\n" + 
-		 		"debug(\"expectedData = %s\", expectedData)\n" + 
-		 		"local changed = false\n" + 
-		 		"local aMap = rec[dataBin]\n" + 
-		 		"local listValue = aMap[mapKey]\n" +
-		 		"debug(\"%s\", listValue)\n" +
-		 		"if position > 0 and position <= list.size(listValue) and listValue[position] == expectedData then\n" +
-		 			"debug(\"Found element!\")\n" +
-		 			"map.remove(aMap, mapKey)\n"+
-		 			"rec[dataBin] = map\n"+
-		 			"aerospike:update(rec)\n"+
-		 			"return 1\n" +
-		 		"end\n" + 
-		 		"return 0\n"+
-		 		"end";
 		 RegisterTask task = client.registerUdfString(null, udfText, "testCode.lua", Language.LUA);
 		 task.waitTillComplete();
 
