@@ -54,7 +54,7 @@ public class TestAdaptiveUdfInvocation {
 		 		"if position > 0 and position <= list.size(listValue) and listValue[position] == expectedData then\n" +
 		 			"debug(\"Found element!\")\n" +
 		 			"map.remove(aMap, mapKey)\n"+
-		 			"rec[dataBin] = aMsap\n"+
+		 			"rec[dataBin] = aMap\n"+
 		 			"aerospike:update(rec)\n"+
 		 			"return 1\n" +
 		 		"end\n" + 

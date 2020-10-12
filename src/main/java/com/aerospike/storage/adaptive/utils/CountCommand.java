@@ -16,6 +16,7 @@ import com.aerospike.client.Value;
 import com.aerospike.client.cdt.MapOperation;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.lua.LuaConfig;
+import com.aerospike.client.policy.QueryPolicy;
 import com.aerospike.client.policy.ScanPolicy;
 import com.aerospike.client.query.ResultSet;
 import com.aerospike.client.query.Statement;
@@ -245,7 +246,11 @@ public class CountCommand extends Command {
 		stmt.setSetName(setName);
 		stmt.setAggregateFunction("count", "countMapItems", Value.get(binName));
 
-		ResultSet rs = client.queryAggregate(null, stmt);
+		// Set timeout policies to make sure we don't timeout when counting large data sets
+		QueryPolicy qp = new QueryPolicy();
+		qp.maxConcurrentNodes = 0;
+		qp.socketTimeout = 3_600_000;
+		ResultSet rs = client.queryAggregate(qp, stmt);
 		rs.next();
 		return (Long)rs.getObject();
 	}
