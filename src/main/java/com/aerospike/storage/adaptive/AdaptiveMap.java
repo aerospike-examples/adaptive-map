@@ -395,7 +395,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 					}
 					BatchPolicy batchPolicy = new BatchPolicy();
 					batchPolicy.maxConcurrentThreads = 0;
-					Record[] results = client.get(null, keys);
+					Record[] results = client.get(batchPolicy, keys);
 					for (count = 0; count < results.length; count++) {
 						if (results[count] == null) {
 							// This has potentially split
@@ -411,7 +411,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split 
 						// between the time we read the original bitmap and when we read this record)
 						Key key = new Key(namespace, setName, keyValue);
-						Record rootRecord = client.get(null, key, BLOCK_MAP_BIN);
+						Record rootRecord = client.get(batchPolicy, key, BLOCK_MAP_BIN);
 						if (rootRecord != null) {
 							byte[] blocks = (byte [])rootRecord.getValue(BLOCK_MAP_BIN);
 							for (Integer blockNum : blocksInDoubt) {
@@ -532,12 +532,17 @@ public class AdaptiveMap implements IAdaptiveMap {
 		for (int i = 0; i < count; i++) {
 			rootKeys[i] = new Key(namespace, setName, recordKeyValues[i]);
 		}
+		if (batchPolicy == null) {
+			batchPolicy = new BatchPolicy();
+		}
+		batchPolicy.maxConcurrentThreads = 0;
+
 		Record[] batchResults = client.get(batchPolicy, rootKeys);
 
 		List<Integer> batchSplitOrigins = null;
 		List<Integer> batchBlockList = null;
 		List<Key> batchBlockKeyList = null;
-		Set<Integer> blocksInDoubt = null;;
+		Set<Integer> blocksInDoubt = null;
 		Set<Integer> blocksToMarkAsExpired = null;
 		for (int i = 0; i < count; i++) {
 			Record thisRecord = batchResults[i];
