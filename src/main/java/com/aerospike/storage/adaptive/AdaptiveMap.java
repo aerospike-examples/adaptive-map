@@ -524,6 +524,9 @@ public class AdaptiveMap implements IAdaptiveMap {
 	@Override
 	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues) {
 		final int count = recordKeyValues.length;
+		@SuppressWarnings("unchecked")
+		final TreeMap<Object, Object>[] resultsAsTreeMap = new TreeMap[count];
+
 		
 		@SuppressWarnings("unchecked")
 		Set<Record>[] recordSet = new Set[count];
@@ -542,13 +545,11 @@ public class AdaptiveMap implements IAdaptiveMap {
 		List<Integer> batchSplitOrigins = null;
 		List<Integer> batchBlockList = null;
 		List<Key> batchBlockKeyList = null;
-		Set<Integer> blocksInDoubt = null;
-		Set<Integer> blocksToMarkAsExpired = null;
+//		Set<Integer> blocksInDoubt = null;
+//		Set<Integer> blocksToMarkAsExpired = null;
 		for (int i = 0; i < count; i++) {
 			Record thisRecord = batchResults[i];
 			if (thisRecord != null) {
-				recordSet[i] = new HashSet<Record>();
-				
 				byte[] bitmap = (byte[]) thisRecord.getValue(BLOCK_MAP_BIN);
 				if (bitwiseOperations.getBit(bitmap, 0)) {
 				
@@ -557,7 +558,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 						batchSplitOrigins = new ArrayList<>();
 						batchBlockList = new ArrayList<>();
 						batchBlockKeyList = new ArrayList<>();
-						blocksInDoubt = new HashSet<>();
+//						blocksInDoubt = new HashSet<>();
 					}
 					List<Integer> blockList = new ArrayList<>();
 					computeBlocks(bitmap, 0, blockList);
@@ -570,33 +571,30 @@ public class AdaptiveMap implements IAdaptiveMap {
 					}
 				}
 				else {
-					// Just add this to the set
-					if (recordSet[i] == null) {
-						recordSet[i] = new HashSet<>();
-					}
-					recordSet[i].add(thisRecord);
+					// Just add this to the final record set
+					resultsAsTreeMap[i] = (TreeMap<Object, Object>) thisRecord.getMap(dataBinName);
 				}
 			}
 		}
 		
 		while (batchSplitOrigins != null && !batchSplitOrigins.isEmpty()) {
 			// Now batch read the items in the list
-			Record[] results = client.get(batchPolicy, batchBlockKeyList.toArray(new Key[batchBlockKeyList.size()]));
+			Record[] batchGetResults = client.get(batchPolicy, batchBlockKeyList.toArray(new Key[batchBlockKeyList.size()]));
 			
 			List<Integer> newBatchSplitOrigins = null;
 			batchBlockKeyList.clear();
 			List<KeyBlockContainer> containers = null;
 			Set<String> keySet = null;
 			
-			for (int i = 0; i < results.length; i++) {
-				if (results[i] != null) {
+			for (int i = 0; i < batchGetResults.length; i++) {
+				if (batchGetResults[i] != null) {
 					// These are continuation results, we must put them back in the set of results associated with
 					// this request. The mapping of the originating request is stored in the batchSplitOrigins
 					int index = batchSplitOrigins.get(i);
 					if (recordSet[index] == null) {
 						recordSet[index] = new HashSet<>();
 					}
-					recordSet[index].add(results[i]);
+					recordSet[index].add(batchGetResults[i]);
 				}
 				else {
 					// This block might have split whilst we were reading it. We need to re-read all the root blocks where this has happened
@@ -668,12 +666,12 @@ public class AdaptiveMap implements IAdaptiveMap {
 		}
 		return records;
 		*/
-		@SuppressWarnings("unchecked")
-		TreeMap<Object, Object>[] results = new TreeMap[count];
 		for (int i = 0; i < count; i++) {
-			results[i] = recordSetToMap(recordSet[i]);
+			if (recordSet[i] != null) {
+				resultsAsTreeMap[i] = recordSetToMap(recordSet[i]);
+			}
 		}
-		return results;
+		return resultsAsTreeMap;
 
 	}
 
