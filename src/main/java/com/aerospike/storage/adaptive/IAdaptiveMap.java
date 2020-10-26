@@ -80,13 +80,31 @@ public interface IAdaptiveMap {
 	 * @param keyValue
 	 * @return
 	 */
-	public TreeMap<Object, Object> getAll(Policy readPolicy, String keyValue);
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String []keyValues);
 	
+	public TreeMap<Object, Object> getAll(Policy readPolicy, String keyValue);
+	/**
+	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
+	 * order as the input recordKeyValues. 
+	 * @param batchPolicy -- the policy to use when performing batch gets.
+	 * @param recordKeyValues -- the keys to retrieve the data from.
+	 */
+	
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String []keyValues);
+	/**
+	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
+	 * order as the input recordKeyValues. 
+	 * @param batchPolicy -- the policy to use when performing batch gets.
+	 * @param recordKeyValues -- the keys to retrieve the data from.
+	 * @param filterCount -- the maximum number of records to return. If 0 or negative, all results will be returned.
+	 * 			If results are filtered out, the returned records will be the first ones in the result set. 
+	 */
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount);
+
 	public Object get(String recordKeyValue, int mapKey);
 	public Object get(String recordKeyValue, long mapKey);
 	public Object get(String recordKeyValue, String mapKey);
 	public Object get(String recordKeyValue, byte[] digest);
+	
 	/**
 	 * Get a count of all of the records associated with the passed keyValue.
 	 */
