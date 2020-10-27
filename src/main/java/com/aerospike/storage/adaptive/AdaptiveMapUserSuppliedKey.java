@@ -49,13 +49,11 @@ import com.aerospike.client.cdt.MapPolicy;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.cdt.MapWriteFlags;
 import com.aerospike.client.cluster.Node;
-import com.aerospike.client.lua.LuaStreamLib.read;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.GenerationPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.RecordExistsAction;
 import com.aerospike.client.policy.WritePolicy;
-import com.aerospike.client.query.PredExp;
 
 /**
  * This class is designed to overcome record size limits of traditional maps on Aerospike. Consider storing time-series
@@ -118,13 +116,12 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	private final IAerospikeClient client;
 	private final String namespace;
 	private final String setName;
-	private final BitwiseData bitwiseOperations = new BitwiseData();
 
 	private final MapPolicy mapPolicy;
 	private final int recordThreshold;
 	private final boolean forceDurableDeletes;
 
-	public static long computeHash(String string) {
+	private static long computeHash(String string) {
 		long h = 1125899906842597L; // prime
 		int len = string.length();
 
@@ -134,25 +131,16 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		return h;
 	}
 	
-	private static Value objectToValue(Object obj) {
-		if (obj instanceof Long) {
-			return Value.get(((Long)obj).longValue());
-		}
-		else if (obj instanceof Integer) {
-			return Value.get(((Integer)obj).intValue());
-		}
-		else if (obj instanceof String) {
-			return Value.get(((String)obj));
-		}
-		else {
-			return Value.get(obj);
-		}
+	/**
+	 * Turn a set of data stored in the Adaptive map into an object. Used in the <code>get</code> methods to form the results
+	 * directly into their desired form, instead of returning a generic form which must then be manually transformed.
+	 * @author timfaulkes
+	 *
+	 * @param <T>
+	 */
+	public interface ObjectMapper<T> {
+		public T map(long key, Object object);
 	}
-
-	public interface UserKeyMap {
-		public long getKey(Record record);
-	}
-	
 	
 	/**
 	 * Create a new adaptive map
@@ -231,20 +219,51 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	}	
 	
 	/**
-	 * Convenience method to extract the contents of a set of records and put them into a map.
+	 * Given a key and the map entries looked up from that key (IndexRelativeRange(-1, 3), determine which
+	 * block this key falls into.
+	 * @param mapKey
+	 * @param mapEntries
+	 * @return
 	 */
-	private TreeMap<Long, Object> recordSetToMap(Set<Record> recordSet) {
-		TreeMap<Long, Object> map = new TreeMap<>();
-		if (recordSet != null) {
-			for (Record record : recordSet) {
-				if (record != null) {
-					map.putAll((Map<Long, Object>)record.getMap(dataBinName));
-				}
+	private long computeBlockNumber(long mapKey, List<Entry<Long, Long>> mapEntries) {
+		// The array will contain either 1,2 or 3 values. We want the largest value <= mapKey
+		// NOTE: For this to work all the time the lowest block must have a map entry of Long. MIN_VALUE
+		Entry<Long, Long> bestEntry = null;
+		for (Entry<Long, Long> entry : mapEntries) {
+			if (entry.getKey() == mapKey) {
+				// exact match, this is the one we want
+				return entry.getValue();
+			}
+			else if (entry.getKey() < mapKey && (bestEntry == null || entry.getKey() > bestEntry.getKey())) {
+				bestEntry = entry;
 			}
 		}
-		return map;
+		return bestEntry.getValue();
+	}
+
+	/**
+	 * Given a key and the map entries looked up from that key (IndexRelativeRange(-1, 3), determine if
+	 * this block is the last block or now.
+	 * @param mapKey
+	 * @param mapEntries
+	 * @return
+	 */
+	private boolean isLastBlock(long mapKey, List<Entry<Long, Long>> mapEntries) {
+		// If the last entry is the one which should contain our key, this is the last block. (Given 
+		// we asked for our block, the one before and the one after)
+		if (mapEntries == null || mapEntries.isEmpty()) {
+			return true;
+		}
+		Entry<Long, Long> bestEntry = mapEntries.get(mapEntries.size() - 1);
+		return (bestEntry.getKey() <= mapKey);
 	}
 	
+	/**
+	 * Generate a unique-ish number. This will be the block number per key, so should have a large amount
+	 * of entropy. However, even with 1,000,000 sub blocks out of 1.844x10^19 keys the probability of 
+	 * 2 colliding is minute.
+	 * @return
+	 */
 	private long generateUniqueNumber() {
 		long result =  HASH_ID ^ ThreadLocalRandom.current().nextLong()^Thread.currentThread().getId();
 		if (result == 0) {
@@ -255,6 +274,12 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 	}
 	
+	/**
+	 * Given the top level record key and the block which we want to load, return a Key object which can be used in Aerospike calls
+	 * @param recordKey
+	 * @param id
+	 * @return
+	 */
 	private Key getCombinedKey(String recordKey, long id) {
 		return new Key(namespace, setName, id != 0 ? recordKey + ":" + id : recordKey);
 	}
@@ -270,6 +295,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * @param operation
 	 * @return
 	 */
+	@SuppressWarnings("unchecked")
 	public Object get(String recordKeyValue, long mapKey) {
 		Key rootKey = getCombinedKey(recordKeyValue, 0);
 		Value mapKeyValue = Value.get(mapKey);
@@ -292,14 +318,11 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 	}
 	
-	public interface ObjectMapper<T> {
-		public T map(long key, Object object);
-	}
-	
 	/**
 	 * Get all of the records associated with the passed keyValue. The result will be a TreeMap (ordered map by key) which contains all the records in the adaptive map.
 	 */
 	//@Override
+	@SuppressWarnings("unchecked")
 	public <T> List<T> getAll(Policy readPolicy, String keyValue, ObjectMapper<T> mapper) {
 		if (readPolicy == null) {
 			readPolicy = new Policy();
@@ -325,7 +348,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 
 				// This block has been split, the results are in the sub-blocks
 				Map<Long, Record> batchRecords = new HashMap<>();
-				List<Long> blockList = new ArrayList(blockMap.values());
+				List<Long> blockList = new ArrayList<>(blockMap.values());
 				Set<Long> blocksInDoubt = new HashSet<>();
 				while (blockList.size() > 0)  {
 					// The blocks to be read are now in blockList. This give an index
@@ -395,6 +418,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * Get a count of all of the records associated with the passed keyValue.
 	 */
 	//@Override
+	@SuppressWarnings("unchecked")
 	public int countAll(WritePolicy policy, String keyValue) {
 		// TODO: refactor this to the Async API.
 		Key rootKey = new Key(namespace, setName, keyValue);
@@ -459,16 +483,6 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		return 0;
 	}
 	
-	private static class KeyBlockContainer {
-		String keyValue;
-		int block;
-		public KeyBlockContainer(String keyValue, int block) {
-			super();
-			this.keyValue = keyValue;
-			this.block = block;
-		}
-	}
-
 	/**
 	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
 	 * order as the input recordKeyValues. 
@@ -491,7 +505,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			super();
 			this.key = key;
 			this.batchIndex = batchIndex;
-			this.data = data;
+			this.setData(data);
 		}
 		public int getBatchIndex() {
 			return batchIndex;
@@ -524,6 +538,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * order as the input recordKeyValues. 
 	 */
 	//@Override
+	@SuppressWarnings({ "unchecked" })
 	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords, ObjectMapper<T> mapper) {
 		final int count = recordKeyValues.length;
 
@@ -539,12 +554,9 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			batchPolicy = new BatchPolicy();
 		}
 		batchPolicy.maxConcurrentThreads = 0;
-long now = System.nanoTime();
 		Record[] batchResults = client.get(batchPolicy, rootKeys);
-System.out.printf("Initial batch took %,.3fms\n", (System.nanoTime() - now)/1_000_000.0);
 
 		List<BatchData> batchData = new ArrayList<>();
-		Map<BatchData, TreeMap<Long, Object>> batchDataResults = new HashMap<>();
 		TreeMap<Long, Long>[] indexArrays = new TreeMap[count];
 		for (int i = 0; i < count; i++) {
 			Record thisRecord = batchResults[i];
@@ -597,11 +609,9 @@ System.out.printf("Initial batch took %,.3fms\n", (System.nanoTime() - now)/1_00
 			Key[] keys = new Key[dataToLoad.size()];
 			for (int i = 0; i < dataToLoad.size(); i++) {
 				BatchData thisData = batchData.get(dataToLoad.get(i));
-				keys[i] = getCombinedKey(recordKeyValues[thisData.batchIndex], thisData.key);
+				keys[i] = getCombinedKey(recordKeyValues[thisData.getBatchIndex()], thisData.getKey());
 			}
-now = System.nanoTime();
 			Record[] batchGetResults = client.get(batchPolicy, keys);
-System.out.printf("loop batch [%d items] took %,.3fms\n", keys.length, (System.nanoTime() - now)/1_000_000.0);
 			for (int i = 0; i < batchGetResults.length; i++) {
 				if (batchGetResults[i] != null) {
 					batchData.get(dataToLoad.get(i)).data = (TreeMap<Long, Object>) batchGetResults[i].getMap(dataBinName);
@@ -620,8 +630,6 @@ System.out.printf("loop batch [%d items] took %,.3fms\n", keys.length, (System.n
 		}
 		
 		// Should have all the data we need
-now = System.nanoTime();
-		@SuppressWarnings("unchecked")
 		final List<T>[] results = new ArrayList[count];
 		int recordCount = 0;
 		for (BatchData thisBatchData : batchData) {
@@ -641,7 +649,6 @@ now = System.nanoTime();
 				}
 			}
 		}
-System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_000_000.0);
 		return results;
 	}
 
@@ -735,6 +742,7 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 	 * @param operation
 	 * @return
 	 */
+	@SuppressWarnings("unchecked")
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, long mapKey) {
 		String id = getLockId();
 		Operation obtainLock = getObtainLockOperation(id, 0);
@@ -1177,10 +1185,10 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 		}
 	}
 
+	@SuppressWarnings("unchecked")
 	private Record waitForLockRelease(LockType lockType, Key key, long timeoutInMs) {
 		long now = new Date().getTime();
 		long timeoutEpoch = now + timeoutInMs;
-		String id = this.getLockId();
 		int currentDelay = 1;
 		while (true) {
 			try {
@@ -1363,13 +1371,17 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 	/** 
 	 * Release the lock on this record, but only if we own it. 
 	 * <p>
-	 * Note that at the moment 
+	 * Note that at the moment this is not needed because we only lock a block when it's splitting. The root block is never unlocked 
+	 * and the child blocks are removed instead of being unlocked (and the remove obviously removes the lock too)
+	 * 
 	 * @param recordKey - The key of the record on which the lock is to be released 
 	 * @return -  true if this thread owned the lock and the lock was successfully released, false if this thread did not own the lock.
 	 */
+	@SuppressWarnings("unused")
 	private boolean releaseLock(LockType lockType, String recordKey, int blockNum) {
 		return releaseLock(lockType, getCombinedKey(recordKey, blockNum));
 	}
+	
 	private boolean releaseLock(LockType lockType, Key key) {
 		WritePolicy writePolicy = new WritePolicy();
 		writePolicy.maxRetries = 5;
@@ -1510,7 +1522,6 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 		dataHalves.add(new ArrayList<Entry<Long,Object>>(dataSize));
 		dataHalves.add(new ArrayList<Entry<Long,Object>>(dataSize));
 		
-		int dataHalf = 0;
 		int counter = 0;
 		NavigableSet<Long> keySet = data.navigableKeySet();
 		for (Iterator<Long> keyIterator = keySet.iterator(); keyIterator.hasNext(); counter++) {
@@ -1532,8 +1543,10 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 		long firstHalfKey = generateUniqueNumber();
 		long secondHalfKey = generateUniqueNumber();
 		
-		client.put(writePolicy, getCombinedKey(recordKey, firstHalfKey), new Bin(dataBinName, dataHalves.get(0), MapOrder.KEY_ORDERED));
-		client.put(writePolicy, getCombinedKey(recordKey, secondHalfKey), new Bin(dataBinName, dataHalves.get(1), MapOrder.KEY_ORDERED));
+		client.operate(writePolicy, getCombinedKey(recordKey, firstHalfKey), 
+				Operation.put(new Bin(dataBinName, dataHalves.get(0), MapOrder.KEY_ORDERED)), getUnlockedTagOperation());
+		client.operate(writePolicy, getCombinedKey(recordKey, secondHalfKey),
+				Operation.put(new Bin(dataBinName, dataHalves.get(1), MapOrder.KEY_ORDERED)), getUnlockedTagOperation());
 		
 		// The sub-records now exist, update the map and delete this record
 		long firstAddress = dataHalves.get(0).get(0).getKey();
@@ -1633,39 +1646,13 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 		}
 	}
 	
-	private long computeBlockNumber(long mapKey, List<Entry<Long, Long>> mapEntries) {
-		// The array will contain either 1,2 or 3 values. We want the largest value <= mapKey
-		// NOTE: For this to work all the time the lowest block must have a map entry of Long. MIN_VALUE
-		Entry<Long, Long> bestEntry = null;
-		for (Entry<Long, Long> entry : mapEntries) {
-			if (entry.getKey() == mapKey) {
-				// exact match, this is the one we want
-				return entry.getValue();
-			}
-			else if (entry.getKey() < mapKey && (bestEntry == null || entry.getKey() > bestEntry.getKey())) {
-				bestEntry = entry;
-			}
-		}
-		return bestEntry.getValue();
-	}
-
-	private boolean isLastBlock(long mapKey, List<Entry<Long, Long>> mapEntries) {
-		// If the last entry is the one which should contain our key, this is the last block. (Given 
-		// we asked for our block, the one before and the one after)
-		if (mapEntries == null || mapEntries.isEmpty()) {
-			return true;
-		}
-		Entry<Long, Long> bestEntry = mapEntries.get(mapEntries.size() - 1);
-		return (bestEntry.getKey() <= mapKey);
-	}
-	
-
 	/**
 	 * Put a record to the adaptive map
 	 * @param recordKey - the key to the record to use
 	 * @param mapKey = the key to insert into the map
 	 * @param value - the value associate with the key.
 	 */
+	@SuppressWarnings("unchecked")
 	public void put(WritePolicy writePolicy, String recordKey, long mapKey, Value value) {
 		
 		// We insert into the root record iff the Lock is not held. If the lock is held it means that this block
@@ -1744,33 +1731,9 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 				throw ae;
 			}
 		}	
-		/*
-		
-		Key key = getCombinedKey(recordKey, blockToAddTo);
-
-		// If this is not the root block, the block is created already
-		WritePolicy writePolicy = new WritePolicy();
-		writePolicy.recordExistsAction = (blockToAddTo == 0) ? RecordExistsAction.UPDATE : RecordExistsAction.UPDATE_ONLY;
-		
-		// We want to insert into the map iff the record is not locked. Hence, we will write the lock with CREATE_ONLY, insert
-		// the record, then delete the lock. If the operation succeeds, we know the lock was not held during the write
-		// Note that as we never actually hold the lock, we don't care about the lock time value
-		String id = getLockId();
-		Operation obtainLock = getObtainLockOperation(id, 0);
-		Operation addToMap = MapOperation.put(mapPolicy, DATA_BIN, Value.get(useDigestForMapKey ? mapKeyDigest : mapKey), value);
-		Operation releaseLock = getReleaseLockOperation(id);
-
-		try {
-			Record result = client.operate(writePolicy, key, obtainLock, addToMap, releaseLock);
-			System.out.println(result.getInt(DATA_BIN));
-		}
-		catch (Exception ae) {
-			// TODO: Implement block splitting logic
-			throw ae;
-		}
-		*/
 	}
 	
+	@SuppressWarnings("unchecked")
 	public void deleteAll(WritePolicy writePolicy, String recordKeyValue) {
 		Key key = getCombinedKey(recordKeyValue, 0);
 		Record record = client.get(null, key);
@@ -1795,16 +1758,8 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 		}
 	}
 
-	/*
-	@Override
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-	*/
-	
 	public static void main(String[] args) {
-		boolean seed = false;
+		boolean seed = true;
 		IAerospikeClient client = new AerospikeClient("127.0.0.1", 3000);
 		if (seed) {
 			client.truncate(null, "test", "testAdaptive", null);
@@ -1832,13 +1787,15 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 			System.out.println(key);
 		}
 		
+		WritePolicy writePolicy = new WritePolicy();
+		writePolicy.sendKey = true;
 		String[] keys = new String[30];
 		for (int i = 0; i < 30; i++) {
 			keys[i] = "test-" + i;
 			if (seed) {
-				for (int j = 0; j < 2+(i*50); j++) {
+				for (int j = 0; j < 2+(i*30); j++) {
 					Value value =Value.get("Data-"+i+"-"+j);
-					map.put(null, keys[i], (long)(100*i + j), value);
+					map.put(writePolicy, keys[i], (long)(100*i + j), value);
 				}
 			}
 		}
@@ -1858,6 +1815,9 @@ System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_
 				}
 				System.out.println(count);
 			}
+		}
+		for (int i = 0; i < 30; i++) {
+			System.out.printf("%d - %d\n", i, map.countAll(null, "test-"+i));
 		}
 		client.close();
 		
