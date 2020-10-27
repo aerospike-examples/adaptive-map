@@ -246,7 +246,13 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	}
 	
 	private long generateUniqueNumber() {
-		return HASH_ID ^ ThreadLocalRandom.current().nextLong()^Thread.currentThread().getId();
+		long result =  HASH_ID ^ ThreadLocalRandom.current().nextLong()^Thread.currentThread().getId();
+		if (result == 0) {
+			return generateUniqueNumber();
+		}
+		else {
+			return result;
+		}
 	}
 	
 	private Key getCombinedKey(String recordKey, long id) {
@@ -468,115 +474,175 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * order as the input recordKeyValues. 
 	 */
 	//@Override
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues) {
-		return this.getAll(batchPolicy, recordKeyValues, 0);
+	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, ObjectMapper<T> mapper) {
+		return this.getAll(batchPolicy, recordKeyValues, 0, mapper);
 	}
+	
+	private class BatchData {
+		private long key;
+		private int batchIndex;
+		private TreeMap<Long, Object> data;
+		public BatchData(int batchIndex, long key) {
+			super();
+			this.key = key;
+			this.batchIndex = batchIndex;
+		}
+		public BatchData(int batchIndex, long key, TreeMap<Long, Object> data) {
+			super();
+			this.key = key;
+			this.batchIndex = batchIndex;
+			this.data = data;
+		}
+		public int getBatchIndex() {
+			return batchIndex;
+		}
+		public long getKey() {
+			return key;
+		}
+		public TreeMap<Long, Object> getData() {
+			return data;
+		}
+		public void setData(TreeMap<Long, Object> data) {
+			this.data = data;
+		}
+		@Override
+		public boolean equals(Object obj) {
+			if (obj == null || (!(obj instanceof BatchData))) {
+				return false;
+			}
+			BatchData data = (BatchData)obj;
+			return ((this.key == data.key) && (this.batchIndex == data.batchIndex));
+		}
+		@Override
+		public int hashCode() {
+			return ((int)this.key) ^ batchIndex;
+		}
+	}
+	
 	/**
 	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
 	 * order as the input recordKeyValues. 
 	 */
 	//@Override
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords) {
-		/*
+	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords, ObjectMapper<T> mapper) {
 		final int count = recordKeyValues.length;
-		@SuppressWarnings("unchecked")
-		final TreeMap<Object, Object>[] resultsAsTreeMap = new TreeMap[count];
 
+		if (maxRecords <= 0) {
+			maxRecords = Long.MAX_VALUE;
+		}
 		
-		@SuppressWarnings("unchecked")
-		Set<Record>[] recordSet = new Set[count];
-
 		Key[] rootKeys = new Key[count];
 		for (int i = 0; i < count; i++) {
-			rootKeys[i] = new Key(namespace, setName, recordKeyValues[i]);
+			rootKeys[i] = getCombinedKey(recordKeyValues[i], 0);
 		}
 		if (batchPolicy == null) {
 			batchPolicy = new BatchPolicy();
 		}
 		batchPolicy.maxConcurrentThreads = 0;
-
+long now = System.nanoTime();
 		Record[] batchResults = client.get(batchPolicy, rootKeys);
+System.out.printf("Initial batch took %,.3fms\n", (System.nanoTime() - now)/1_000_000.0);
 
-		List<Integer> batchSplitOrigins = null;
-		List<Integer> batchBlockList = null;
-		List<Key> batchBlockKeyList = null;
-//		Set<Integer> blocksInDoubt = null;
-//		Set<Integer> blocksToMarkAsExpired = null;
+		List<BatchData> batchData = new ArrayList<>();
+		Map<BatchData, TreeMap<Long, Object>> batchDataResults = new HashMap<>();
+		TreeMap<Long, Long>[] indexArrays = new TreeMap[count];
 		for (int i = 0; i < count; i++) {
 			Record thisRecord = batchResults[i];
 			if (thisRecord != null) {
-				byte[] bitmap = (byte[]) thisRecord.getValue(BLOCK_MAP_BIN);
-				if (bitwiseOperations.getBit(bitmap, 0)) {
-				
-					// This block has been split, the results are in the sub-blocks
-					if (batchSplitOrigins == null) {
-						batchSplitOrigins = new ArrayList<>();
-						batchBlockList = new ArrayList<>();
-						batchBlockKeyList = new ArrayList<>();
-//						blocksInDoubt = new HashSet<>();
-					}
-					List<Integer> blockList = new ArrayList<>();
-					computeBlocks(bitmap, 0, blockList);
-
-					// The blocks to be read are now in blockList. This give an index
-					for (int thisBlock : blockList) {
-						batchBlockList.add(thisBlock);
-						batchBlockKeyList.add(getCombinedKey(recordKeyValues[i], thisBlock));
-						batchSplitOrigins.add(i);
+				TreeMap<Long, Long> blockMap = (TreeMap<Long, Long>) thisRecord.getValue(BLOCK_MAP_BIN);
+				if (blockMap != null && !blockMap.isEmpty()) {
+					// This block has split, we have the indexes
+					indexArrays[i] = blockMap;
+					for (long thisKey : blockMap.keySet()) {
+						batchData.add(new BatchData(i, blockMap.get(thisKey)));
 					}
 				}
 				else {
 					// Just add this to the final record set
-					resultsAsTreeMap[i] = (TreeMap<Object, Object>) thisRecord.getMap(dataBinName);
+					batchData.add(new BatchData(i, 0, (TreeMap<Long, Object>) thisRecord.getMap(dataBinName)));
 				}
 			}
 		}
 		
-		while (batchSplitOrigins != null && !batchSplitOrigins.isEmpty()) {
-			// Now batch read the items in the list
-			Record[] batchGetResults = client.get(batchPolicy, batchBlockKeyList.toArray(new Key[batchBlockKeyList.size()]));
-			
-			List<Integer> newBatchSplitOrigins = null;
-			batchBlockKeyList.clear();
-			List<KeyBlockContainer> containers = null;
-			Set<String> keySet = null;
-			
-			for (int i = 0; i < batchGetResults.length; i++) {
-				if (batchGetResults[i] != null) {
-					// These are continuation results, we must put them back in the set of results associated with
-					// this request. The mapping of the originating request is stored in the batchSplitOrigins
-					int index = batchSplitOrigins.get(i);
-					if (recordSet[index] == null) {
-						recordSet[index] = new HashSet<>();
-					}
-					recordSet[index].add(batchGetResults[i]);
+		while (true) {
+			// Guestimate how many records we need.
+			long recordEstimate = 0;
+			int lastBatchIndex = -1;
+			List<Integer> dataToLoad = new ArrayList<>();
+			for (int i = 0; i < batchData.size(); i++) {
+				BatchData thisBatchData = batchData.get(i);
+				if (thisBatchData.getData() != null) {
+					recordEstimate += thisBatchData.getData().size();
 				}
 				else {
-					// This block might have split whilst we were reading it. We need to re-read all the root blocks where this has happened
-					if (containers == null) {
-						containers = new ArrayList<>();
-						keySet = new HashSet<>();
+					// Assume the records are 75% full unless they're the last one in a block
+					if (lastBatchIndex == -1 || lastBatchIndex == thisBatchData.getBatchIndex()) {
+						recordEstimate += recordThreshold * 0.75;
 					}
-					int index = batchSplitOrigins.get(i);
-					containers.add(new KeyBlockContainer(recordKeyValues[index], batchBlockList.get(i)));
-					keySet.add(recordKeyValues[index]);
+					else {
+						recordEstimate += recordThreshold * 0.15;
+					}
+					lastBatchIndex = thisBatchData.getBatchIndex();
+					dataToLoad.add(i);
+				}
+				if (recordEstimate > maxRecords) {
+					break;
 				}
 			}
-			if (containers != null) {
-				// TODO: Cover this case
+			
+			if (dataToLoad.size() == 0) {
+				break;
 			}
-
-			batchSplitOrigins = newBatchSplitOrigins;
-		}				
-		
-		for (int i = 0; i < count; i++) {
-			if (recordSet[i] != null) {
-				resultsAsTreeMap[i] = recordSetToMap(recordSet[i]);
+			List<Integer> newDataToLoad = new ArrayList<>();
+			Key[] keys = new Key[dataToLoad.size()];
+			for (int i = 0; i < dataToLoad.size(); i++) {
+				BatchData thisData = batchData.get(dataToLoad.get(i));
+				keys[i] = getCombinedKey(recordKeyValues[thisData.batchIndex], thisData.key);
+			}
+now = System.nanoTime();
+			Record[] batchGetResults = client.get(batchPolicy, keys);
+System.out.printf("loop batch [%d items] took %,.3fms\n", keys.length, (System.nanoTime() - now)/1_000_000.0);
+			for (int i = 0; i < batchGetResults.length; i++) {
+				if (batchGetResults[i] != null) {
+					batchData.get(dataToLoad.get(i)).data = (TreeMap<Long, Object>) batchGetResults[i].getMap(dataBinName);
+				}
+				else {
+					// TODO: This block has split or been removed. Add it to the list to reload.
+					// Also, we should check the number of records, and if not large enough reload next records.
+				}
+			}
+			if (newDataToLoad.size() == 0) {
+				break;
+			}
+			else {
+				dataToLoad = newDataToLoad;
 			}
 		}
-		return resultsAsTreeMap;
-		*/
-		return null;
+		
+		// Should have all the data we need
+now = System.nanoTime();
+		@SuppressWarnings("unchecked")
+		final List<T>[] results = new ArrayList[count];
+		int recordCount = 0;
+		for (BatchData thisBatchData : batchData) {
+			TreeMap<Long, Object> data = thisBatchData.getData();
+			int index = thisBatchData.batchIndex;
+			if (data != null) {
+				// This should always be the case.
+				for (long key : data.keySet()) {
+					if (results[index] == null) {
+						results[index] = new ArrayList<T>();
+					}
+					results[index].add(mapper.map(data.get(key)));
+					recordCount++;
+					if (recordCount >= maxRecords) {
+						return results;
+					}
+				}
+			}
+		}
+System.out.printf("Forming Objects took %,.3fms\n", (System.nanoTime() - now)/1_000_000.0);
+		return results;
 	}
 
 	/**
@@ -1738,9 +1804,12 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	*/
 	
 	public static void main(String[] args) {
+		boolean seed = false;
 		IAerospikeClient client = new AerospikeClient("127.0.0.1", 3000);
-		client.truncate(null, "test", "testAdaptive", null);
-		AdaptiveMapUserSuppliedKey map = new AdaptiveMapUserSuppliedKey(client, "test", "testAdaptive", "map", new MapPolicy(MapOrder.KEY_ORDERED, 0), 10); 
+		if (seed) {
+			client.truncate(null, "test", "testAdaptive", null);
+		}
+		AdaptiveMapUserSuppliedKey map = new AdaptiveMapUserSuppliedKey(client, "test", "testAdaptive", "map", new MapPolicy(MapOrder.KEY_ORDERED, 0), 100); 
 
 		for (long i = 0; i < 200; i+=10) {
 			Value value = Value.get("Key-" + i);
@@ -1761,6 +1830,34 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		List<String> data = map.getAll(null, "testKey", (recordData) -> {return recordData.toString();} );
 		for (String key : data) {
 			System.out.println(key);
+		}
+		
+		String[] keys = new String[30];
+		for (int i = 0; i < 30; i++) {
+			keys[i] = "test-" + i;
+			if (seed) {
+				for (int j = 0; j < 2+(i*50); j++) {
+					Value value =Value.get("Data-"+i+"-"+j);
+					map.put(null, keys[i], (long)(100*i + j), value);
+				}
+			}
+		}
+		for (int c = 0; c < 100; c++) {
+			int desiredCount = 20000;
+			long now = System.nanoTime();
+			List<String>[] resultData = map.getAll(null, keys, desiredCount, (recordData) -> {return recordData.toString(); } );
+			long time = System.nanoTime() - now;
+			System.out.printf("getting %d records took %,.3fms\n", desiredCount, time / 1000000.0);
+			if (c == 99) {
+				int count = 0;
+				for (int i = 0; i < 30; i++) {
+					System.out.println(i + " -" + resultData[i]);
+					if (resultData[i] != null) {
+						count += resultData[i].size();
+					}
+				}
+				System.out.println(count);
+			}
 		}
 		client.close();
 		
