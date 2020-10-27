@@ -99,10 +99,8 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * been split -- a 1 in the bitmap for the block says that the block has split.
 	 */
 	private static final String BLOCK_MAP_BIN = "blks";
-	/**
-	 * The lock to be used on the root node when the block map is changing. This record will also have a LOCK_BIN
-	 * for when it's adjusting 
-	 */
+	private static final String ROOT_INDICATOR = "root_blk";
+	
 	/**
 	 * The maximum time any lock should be held for during the splitting of a record
 	 */
@@ -1577,9 +1575,11 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, 0);
 		if (isRootBlock) {
 			// The root block has split, remove the data from the root block. Do NOT release the lock as this is a flag to imply we've split.
+			// Also add in a new bin to identifiy this as the root of an adaptive map.
 			client.operate(writePolicy, key, 
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(firstIndex), Value.get(firstBlock)),
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(secondIndex), Value.get(secondBlock)),
+					Operation.put(new Bin(ROOT_INDICATOR, 2)),
 					Operation.put(Bin.asNull(dataBinName)));
 		}
 		else {
