@@ -1514,7 +1514,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		int splitIndex = dataSize / 2;
 		
 		// If we're the last block then we want to split it unevenly.
-		if (isLastBlock(mapKey, blockMap) && recordThreshold  >= 5) {
+		if (isLastBlock(mapKey, blockMap) && recordThreshold  >= 5 && dataSize > recordThreshold) {
 			splitIndex = recordThreshold - 2;
 		}
 		
@@ -1759,7 +1759,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	}
 
 	public static void main(String[] args) {
-		boolean seed = true;
+		boolean seed = false;
 		IAerospikeClient client = new AerospikeClient("127.0.0.1", 3000);
 		if (seed) {
 			client.truncate(null, "test", "testAdaptive", null);
@@ -1800,7 +1800,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			}
 		}
 		for (int c = 0; c < 100; c++) {
-			int desiredCount = 20000;
+			int desiredCount = 10000;
 			long now = System.nanoTime();
 			List<String>[] resultData = map.getAll(null, keys, desiredCount, (key, recordData) -> {return key +": " + recordData.toString(); } );
 			long time = System.nanoTime() - now;
