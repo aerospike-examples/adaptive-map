@@ -1759,7 +1759,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	}
 
 	public static void main(String[] args) {
-		boolean seed = false;
+		boolean seed = true;
 		IAerospikeClient client = new AerospikeClient("127.0.0.1", 3000);
 		if (seed) {
 			client.truncate(null, "test", "testAdaptive", null);
@@ -1793,8 +1793,9 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		for (int i = 0; i < 30; i++) {
 			keys[i] = "test-" + i;
 			if (seed) {
-				for (int j = 0; j < 2+(i*30); j++) {
-					Value value =Value.get("Data-"+i+"-"+j);
+//				for (int j = 0; j < 2+(i*30); j++) {
+				for (int j = 0; j < 200000; j++) {
+					Value value =Value.get("Data-"+i+"-"+j+"  123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
 					map.put(writePolicy, keys[i], (long)(100*i + j), value);
 				}
 			}
