@@ -684,13 +684,28 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		return results;
 	}
 
+	private static class VolatileBoolean {
+		public volatile boolean flag;
+
+		public VolatileBoolean(boolean flag) {
+			super();
+			this.flag = flag;
+		}
+		public boolean isFlag() {
+			return flag;
+		}
+		public void setFlag(boolean flag) {
+			this.flag = flag;
+		}
+	}
+	
 	/**
 	 * Get all the records which match the passed operations. The operations are able to do things like "getByValueRange", etc. Each operation
 	 * will be applied to all the records which match, and the records returned.
 	 */
 	@Override
+	@SuppressWarnings("unchecked")
 	public Set<Record> getAll(WritePolicy opPolicy, String keyValue, Operation ... operations) {
-	/*
 		Key rootKey = new Key(namespace, setName, keyValue);
 		int numOperations = operations.length;
 		Operation[] allOps = new Operation[numOperations + 2];
@@ -704,55 +719,40 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		Record result = client.operate(opPolicy, rootKey, allOps);
 
 		if (result != null) {
-			byte[] bitmap = (byte[]) result.getValue(BLOCK_MAP_BIN);
-			if (bitwiseOperations.getBit(bitmap, 0)) {
-
-				// This block has been split, the results are in the sub-blocks
-				List<Integer> blockList = new ArrayList<>();
-				computeBlocks(bitmap, 0, blockList);
-				Set<Integer> blocksInDoubt = new HashSet<>();
-				Set<Integer> blocksToMarkAsExpired = null;
-				// The blocks to be read are now in blockList. This give an index
-				while (blockList.size() > 0)  {
-					blockList.parallelStream().forEach(item -> {
+			Map<Long, Long> blockMap = (Map<Long, Long>) result.getMap(BLOCK_MAP_BIN);
+			if (blockMap != null && !blockMap.isEmpty()) {
+				final VolatileBoolean needsReprocessing = new VolatileBoolean(true);
+				Map<Long, Record> retrievedRecords = new HashMap<>();
+				while (needsReprocessing.isFlag()) {
+					needsReprocessing.setFlag(false);
+					Collection<Long> blockList = new ArrayList<Long>(blockMap.values());
+					// For each block in the map, load it's data but only if we don't already have it.
+					blockList.parallelStream().filter(item -> !retrievedRecords.containsKey(item)).forEach(item -> {
 						Key thisKey = getCombinedKey(keyValue, item);
 						Record thisResult = client.operate(opPolicy, thisKey, operations);
 						if (thisResult != null) {
-							records.add(thisResult);
+							retrievedRecords.put(item, thisResult);
 						}
 						else {
 							// There are 2 reasons this might have returned null: either the block has split and been removed whilst we were processing the read
 							// or the record has TTLd out. We need to check the root block to check.
-							blocksInDoubt.add(item);
+							needsReprocessing.setFlag(true);
 						}
 					});
-					blockList.clear();
-					if (blocksInDoubt.size() > 0) {
-						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split
-						// between the time we read the original bitmap and when we read this record)
-						Key key = new Key(namespace, setName, keyValue);
-						Record rootRecord = client.get(opPolicy, key, BLOCK_MAP_BIN);
-						if (rootRecord != null) {
-							byte[] blocks = (byte [])rootRecord.getValue(BLOCK_MAP_BIN);
-							for (Integer blockNum : blocksInDoubt) {
-								if (bitwiseOperations.getBit(blocks, blockNum)) {
-									// This has split, add it to the next read. Don't update the block list
-									// as this is the job of the writing process.
-									blockList.add(2*blockNum+1);
-									blockList.add(2*blockNum+2);
-								}
-								else {
-									// This record has TTLd out. We should update the bitmap async.
-									if (blocksToMarkAsExpired == null) {
-										blocksToMarkAsExpired = new HashSet<>();
-									}
-									blocksToMarkAsExpired.add(blockNum);
-								}
-							}
-						}
+					if (needsReprocessing.isFlag()) {
+						result = client.operate(opPolicy, rootKey, Operation.get(BLOCK_MAP_BIN));
+						blockMap = (Map<Long, Long>) result.getMap(BLOCK_MAP_BIN);
 					}
 				}
-
+				
+				// Now we're guaranteed to have a superset of the blocks in the map, form them into the appropriate result
+				for (long key : blockMap.values()) {
+					Record thisRecord = retrievedRecords.get(key);
+					if (thisRecord != null) {
+						// Should always be the case...
+						records.add(thisRecord);
+					}
+				}
 			}
 			else {
 				// This block exists and has not been split, therefore it contains the results.
@@ -760,8 +760,6 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			}
 		}
 		return records;
-		*/
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
 	}
 
 	/**
