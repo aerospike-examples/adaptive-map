@@ -16,6 +16,7 @@
  */
 package com.aerospike.storage.adaptive;
 
+import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -25,86 +26,116 @@ import com.aerospike.client.Value;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.storage.adaptive.AdaptiveMapUserSuppliedKey.ObjectMapper;
 
 public interface IAdaptiveMap {
-	/** 
-	 * Return the hash function used by this map. If {@link #setHashFuction(Hash)} has not been called, this will 
+	/**
+	 * Return the hash function used by this map. If {@link #setHashFuction(Hash)} has not been called, this will
 	 * return a hash which does RIPEMD160 encoding
 	 * @return
 	 */
 	public Hash getHashFunction();
 	/**
-	 * 
+	 *
 	 * @param hash
 	 */
 	public void setHashFuction(Hash hash);
-	
+
 	/**
 	 * Remove all the sub-records in the adaptive map
 	 * @param recordKeyValue
 	 */
 	public void deleteAll(WritePolicy writePolicy, String recordKeyValue);
-	
+
 	/**
 	 * Remove a single record from the underlying map
 	 * @param recordKeyValue - the key of the record
-	 * @param mapKey - the key to remove from the map 
+	 * @param mapKey - the key to remove from the map
 	 */
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, int mapKey);
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, long mapKey);
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, String mapKey);
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, byte[] digest);
-	
+
 	/**
 	 * Insert / Update a value in the adaptive map
 	 * @param writePolicy - the write policy to use for retries, etc. Some of the parameters like the RecordExistsAction will be overridden as necessary
-	 * @param recordKey - the key of the record 
+	 * @param recordKey - the key of the record
 	 * @param mapKey - the key of the map to insert / update.
 	 * @param mapKeyDigest - the digest of the key. Can be null. If null and it is needed, it will be obtained by invoking the getHashFunction().getHash(mapKey)
 	 * @param value - The value to be stored in the map
 	 */
 	public void put(WritePolicy writePolicy, String recordKey, Object mapKey, byte[] mapKeyDigest, Value value);
-	
+
 	/**
-	 * Perform all the operations passed to this method on every map/sub-map associated with the passed key. The operations may be applied on 
-	 * the sub-maps in parallel. 
+	 * Perform all the operations passed to this method on every map/sub-map associated with the passed key. The operations may be applied on
+	 * the sub-maps in parallel.
 	 * @param opPolicy - The WritePolicy to be passed to the individual operations
 	 * @param keyValue - The key of the map
 	 * @param operations - The set of operations to be applied to each map/sub-map
 	 * @return - The set of records associated with the applied operations. There will be one record for each map/sub-map in the set.
 	 */
 	public Set<Record> getAll(WritePolicy opPolicy, String keyValue, Operation ... operations);
+
 	/**
 	 * Get all of the records associated with the passed keyValue. The result will be a TreeMap (ordered map by key) which contains all the records in the adaptive map.
 	 * @param readPolicy
 	 * @param keyValue
 	 * @return
 	 */
-	
 	public TreeMap<Object, Object> getAll(Policy readPolicy, String keyValue);
+
 	/**
 	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
-	 * order as the input recordKeyValues. 
+	 * order as the input recordKeyValues.
 	 * @param batchPolicy -- the policy to use when performing batch gets.
 	 * @param recordKeyValues -- the keys to retrieve the data from.
 	 */
-	
 	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String []keyValues);
+
 	/**
 	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
-	 * order as the input recordKeyValues. 
+	 * order as the input recordKeyValues.
 	 * @param batchPolicy -- the policy to use when performing batch gets.
 	 * @param recordKeyValues -- the keys to retrieve the data from.
 	 * @param filterCount -- the maximum number of records to return. If 0 or negative, all results will be returned.
-	 * 			If results are filtered out, the returned records will be the first ones in the result set. 
+	 * 			If results are filtered out, the returned records will be the first ones in the result set.
 	 */
 	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount);
+
+	/**
+	 * Get all of the records associated with the passed keyValue. The result will be a TreeMap (ordered map by key) which contains all the records in the adaptive map.
+	 * @param readPolicy
+	 * @param keyValue
+	 * @return
+	 */
+	public <T> List<T> getAll(Policy readPolicy, String keyValue, ObjectMapper<T> mapper);
+
+	/**
+	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
+	 * order as the input recordKeyValues.
+	 * @param readPolicy
+	 * @param recordKeyValues -- the keys to retrieve the data from.
+	 * @return
+	 */
+	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, ObjectMapper<T> mapper);
+
+	/**
+	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
+	 * order as the input recordKeyValues.
+	 * @param readPolicy
+	 * @param recordKeyValues -- the keys to retrieve the data from.
+	 * @param maxRecords -- maximum number of records to retrieve.
+	 * @return
+	 */
+	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords, ObjectMapper<T> mapper);
+
 
 	public Object get(String recordKeyValue, int mapKey);
 	public Object get(String recordKeyValue, long mapKey);
 	public Object get(String recordKeyValue, String mapKey);
 	public Object get(String recordKeyValue, byte[] digest);
-	
+
 	/**
 	 * Get a count of all of the records associated with the passed keyValue.
 	 */
@@ -122,7 +153,7 @@ public interface IAdaptiveMap {
 	 * The UDF will be called exactly once if the element is found in the adaptive map with the record containing the block which includes the mapKey.
 	 * If the adaptive map does not contain the element, the UDF will not be called at all.
 	 * <p/>
-	 * Note that no lock is obtained whilst the UDF is being called -- the atomic nature of UDFs in Aerospike will ensure atomicity. However, the 
+	 * Note that no lock is obtained whilst the UDF is being called -- the atomic nature of UDFs in Aerospike will ensure atomicity. However, the
 	 * explicit locks used by the adaptive map when splitting ARE observed.
 	 * <p/>
 	 * When the UDF is called, the first parameter will be the record (as always), the second parameter will be the key in the map which is desired,
@@ -136,6 +167,6 @@ public interface IAdaptiveMap {
 	 * @param args
 	 * @return
 	 */
-	Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest,
+	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest,
 			String packageName, String functionName, Value[] args);
 }
