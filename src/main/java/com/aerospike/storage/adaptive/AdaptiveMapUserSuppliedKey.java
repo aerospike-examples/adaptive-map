@@ -58,28 +58,28 @@ import com.aerospike.client.policy.WritePolicy;
 /**
  * This class is designed to overcome record size limits of traditional maps on Aerospike. Consider storing time-series
  * data, such as credit card transactions associated with a particular customer. The number of transactions are unbounded
- * but Aerospike imposes finite size records limits; <= 1MB in earlier than 4.2, up to 8MB in 4.2+. In this example for 
+ * but Aerospike imposes finite size records limits; <= 1MB in earlier than 4.2, up to 8MB in 4.2+. In this example for
  * example we want to store a map which is keyed by timestamp and the data is the appropriate credit card transaction.
- * <p>   
+ * <p>
  * If it is assumed that credit card transaction is 1kB in size, this means it is not possible to store more than say
  * 8,000 transactions in a single map. Whilst there are strategies around this (for example by storing the transactions
  * on a per-day basis and querying multiple records) they all suffer from particular drawbacks, not the least of which
  * is the increase in code complexity.
  * <p>
- * 
+ *
  * @author Tim
  *
  */
 @SuppressWarnings("serial")
-public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
+public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	/** The value to put in the map when the record is locked */
 	private static final String LOCK_MAP_ENTRY = "locked";
-	/** 
+	/**
 	 * When the record in unlocked we need a map entry which is exactly the same size as the locked entry. This effectively
-	 * reserves space in the record -- if we wish to split on RECORD_TOO_BIG exceptions, there is a possibility that the 
+	 * reserves space in the record -- if we wish to split on RECORD_TOO_BIG exceptions, there is a possibility that the
 	 * underlying record will not have space to hold a lock value, forcing an unsplittable block.
 	 * <p>
-	 * For example, consider a record which is 5 bytes under the split limit. If a 1kB write comes in, it will force the 
+	 * For example, consider a record which is 5 bytes under the split limit. If a 1kB write comes in, it will force the
 	 * record to split, which will need to obtain the lock. If there is no space reserved for the lock, this lock will fail
 	 * again with RECORD_TOO_BIG which means no more items can be inserted into this record.
 	 */
@@ -87,26 +87,26 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 
 	/** The name of the bin in which to store data */
 	private final String dataBinName;
-	
-	/** 
+
+	/**
 	 * The name of the bin used to lock a record. This bin will end up containing a map: if the map contains certain
 	 * key the lock is held, if the map is empty or does not exist, the lock is not held.
 	 */
 	private static final String LOCK_BIN = "lock";
-	
+
 	/**
 	 * The name of the bin on the root block used to hold the block bitmap. The bitmap determines if a particular block has
 	 * been split -- a 1 in the bitmap for the block says that the block has split.
 	 */
 	private static final String BLOCK_MAP_BIN = "blks";
 	private static final String ROOT_INDICATOR = "root_blk";
-	
+
 	/**
 	 * The maximum time any lock should be held for during the splitting of a record
 	 */
 	private static final long MAX_LOCK_TIME = 100;
 	/**
-	 * A moderately unique ID 
+	 * A moderately unique ID
 	 */
 	private static final String ID = UUID.randomUUID().toString(); // This needs to be unique only for this session, used only for locking
 	private static final long HASH_ID = computeHash(ID);
@@ -128,7 +128,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 		return h;
 	}
-	
+
 	/**
 	 * Turn a set of data stored in the Adaptive map into an object. Used in the <code>get</code> methods to form the results
 	 * directly into their desired form, instead of returning a generic form which must then be manually transformed.
@@ -139,17 +139,17 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	public interface ObjectMapper<T> {
 		public T map(long key, Object object);
 	}
-	
+
 	/**
 	 * Create a new adaptive map
-	 * 
+	 *
 	 * @param client - the AerospikeClient used to manipulate this map
 	 * @param namespace - The namespace for the map
 	 * @param setName - The set name to use for the map
 	 * @param mapBin - The bin name to store the bin in. Note that this class reserves the right to create other bins on the record
 	 * to store things like lock information
 	 * @param mapPolicy - The mapPolicy to use when inserting an element into the map
-	 * @param recordThreshold - How many records can be stored in a block before the block splits. For example, if this number is set to 
+	 * @param recordThreshold - How many records can be stored in a block before the block splits. For example, if this number is set to
 	 * 1,000, the 1,001st record would cause the block to split on inserting. It is possible that the block will split before this however --
 	 * if the insertion of a map entry results in a RECORD_TOO_BIG exception, the block will split automatically if there is > 1 entry.
 	 * @param forceDurableDeletes - If true, all deletes will be done durably irrespective of the durableDelete flag passed in the write policy. If false, the writePolicy will be honored.
@@ -176,20 +176,25 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * <p/>
 	 * Note that this constructor has to determine whether to force durable deletes and so it needs to connect to the cluster and use the Info protocol.
 	 * Hence, if this constructor is used, ensure the connected user has priviledges to do this.
-	 * 
+	 *
 	 * @param client - the AerospikeClient used to manipulate this map
 	 * @param namespace - The namespace for the map
 	 * @param setName - The set name to use for the map
 	 * @param mapBin - The bin name to store the bin in. Note that this class reserves the right to create other bins on the record
 	 * to store things like lock information
 	 * @param mapPolicy - The mapPolicy to use when inserting an element into the map
-	 * @param recordThreshold - How many records can be stored in a block before the block splits. For example, if this number is set to 
+	 * @param recordThreshold - How many records can be stored in a block before the block splits. For example, if this number is set to
 	 * 1,000, the 1,001st record would cause the block to split on inserting. It is possible that the block will split before this however --
 	 * if the insertion of a map entry results in a RECORD_TOO_BIG exception, the block will split automatically if there is > 1 entry.
 	 */
 	public AdaptiveMapUserSuppliedKey(final IAerospikeClient client, final String namespace, final String setName, final String mapBin, final MapPolicy mapPolicy, int recordThreshold) {
 		// We need to determine if durable deletes must be done irrespective of the write policy, so look at the namespace info for this.
 		this(client, namespace, setName, mapBin, mapPolicy, recordThreshold, forceDurableDeletes(client, namespace));
+	}
+
+	@Override
+	public void put(WritePolicy writePolicy, String recordKey, Object mapKey, byte[] mapKeyDigest, Value value) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
 	}
 
 	private static boolean forceDurableDeletes(IAerospikeClient client, String namespace) {
@@ -214,8 +219,8 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			}
 		}
 		return isSC && (!allowExpunge);
-	}	
-	
+	}
+
 	/**
 	 * Given a key and the map entries looked up from that key (IndexRelativeRange(-1, 3), determine which
 	 * block this key falls into.
@@ -247,7 +252,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * @return
 	 */
 	private boolean isLastBlock(long mapKey, List<Entry<Long, Long>> mapEntries) {
-		// If the last entry is the one which should contain our key, this is the last block. (Given 
+		// If the last entry is the one which should contain our key, this is the last block. (Given
 		// we asked for our block, the one before and the one after)
 		if (mapEntries == null || mapEntries.isEmpty()) {
 			return true;
@@ -255,10 +260,10 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		Entry<Long, Long> bestEntry = mapEntries.get(mapEntries.size() - 1);
 		return (bestEntry.getKey() <= mapKey);
 	}
-	
+
 	/**
 	 * Generate a unique-ish number. This will be the block number per key, so should have a large amount
-	 * of entropy. However, even with 1,000,000 sub blocks out of 1.844x10^19 keys the probability of 
+	 * of entropy. However, even with 1,000,000 sub blocks out of 1.844x10^19 keys the probability of
 	 * 2 colliding is minute.
 	 * @return
 	 */
@@ -271,7 +276,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			return result;
 		}
 	}
-	
+
 	/**
 	 * Given the top level record key and the block which we want to load, return a Key object which can be used in Aerospike calls
 	 * @param recordKey
@@ -285,7 +290,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	private Operation getRelevantBlocksOperation(long id) {
 		return MapOperation.getByKeyRelativeIndexRange(BLOCK_MAP_BIN, Value.get(id), -1, 3, MapReturnType.KEY_VALUE);
 	}
-	
+
 	/**
 	 * Read a single key from the Map and return the value associated with it
 	 * @param recordKeyValue
@@ -293,19 +298,20 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * @param operation
 	 * @return
 	 */
+	@Override
 	@SuppressWarnings("unchecked")
 	public Object get(String recordKeyValue, long mapKey) {
 		Key rootKey = getCombinedKey(recordKeyValue, 0);
 		Value mapKeyValue = Value.get(mapKey);
-		Record record = client.operate(null, rootKey, 
+		Record record = client.operate(null, rootKey,
 				MapOperation.getByKey(dataBinName, mapKeyValue, MapReturnType.VALUE),
 				getRelevantBlocksOperation(mapKey));
-		
+
 		// Check to see if which block we should read
 		List<Entry<Long, Long>> minBlocks = (List<Entry<Long, Long>>) record.getValue(BLOCK_MAP_BIN);
 		if (minBlocks != null && minBlocks.size() == 0) {
 			long block = computeBlockNumber(mapKey, minBlocks);
-			record = client.operate(null, getCombinedKey(recordKeyValue, block), 
+			record = client.operate(null, getCombinedKey(recordKeyValue, block),
 					MapOperation.getByKey(dataBinName, mapKeyValue, MapReturnType.VALUE));
 		}
 		if (record == null) {
@@ -315,11 +321,25 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			return record.getValue(dataBinName);
 		}
 	}
-	
+
+	@Override
+	public Object get(String recordKeyValue, int mapKey) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public Object get(String recordKeyValue, String mapKey) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public Object get(String recordKeyValue, byte[] digest) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+
+
 	/**
 	 * Get all of the records associated with the passed keyValue. The result will be a TreeMap (ordered map by key) which contains all the records in the adaptive map.
 	 */
-	//@Override
+	@Override
 	@SuppressWarnings("unchecked")
 	public <T> List<T> getAll(Policy readPolicy, String keyValue, ObjectMapper<T> mapper) {
 		if (readPolicy == null) {
@@ -329,7 +349,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		Set<Record> records = new HashSet<>();
 		Record result = client.get(readPolicy, rootKey);
 
-		if (result != null) {			
+		if (result != null) {
 			List<T> objectResults = new ArrayList<T>(records.size());
 
 			TreeMap<Long, Long> blockMap = (TreeMap<Long, Long>) result.getValue(BLOCK_MAP_BIN);
@@ -341,7 +361,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				batchPolicy.timeoutDelay = readPolicy.timeoutDelay;
 				batchPolicy.socketTimeout = readPolicy.socketTimeout;
 				batchPolicy.totalTimeout = readPolicy.totalTimeout;
-				
+
 				batchPolicy.maxConcurrentThreads = 0;
 
 				// This block has been split, the results are in the sub-blocks
@@ -367,10 +387,10 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 							batchRecords.put(rawKeys[count], results[count]);
 						}
 					}
-					
+
 					blockList.clear();
 					if (blocksInDoubt.size() > 0) {
-						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split 
+						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split
 						// between the time we read the original bitmap and when we read this record)
 						Key key = new Key(namespace, setName, keyValue);
 						Record rootRecord = client.get(batchPolicy, key, BLOCK_MAP_BIN);
@@ -387,7 +407,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 						}
 					}
 				}
-				
+
 				// To get here, we must have a block list which has all the blocks in, amalgamate them
 				for (long blockMin : blockMap.keySet()) {
 					long thisBlock = blockMap.get(blockMin);
@@ -411,10 +431,24 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			return null;
 		}
 	}
-	
+
+	@Override
+	public TreeMap<Object, Object> getAll(Policy readPolicy, String keyValue) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String []keyValues) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+
 	/**
 	 * Get a count of all of the records associated with the passed keyValue.
 	 */
+	@Override
 	//@Override
 	@SuppressWarnings("unchecked")
 	public int countAll(WritePolicy policy, String keyValue) {
@@ -433,13 +467,13 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				Collection<Long> blockList = map.values();
 				boolean blocksInDoubt;
 				Map<Long, Long> blockCounts = new HashMap<>();
-				
+
 				while (blockList.size() > 0)  {
 					blocksInDoubt = false;
 					for (long thisBlock : blockList) {
 						if (!blockCounts.containsKey(thisBlock)) {
 							Record mapCount = client.operate(null, getCombinedKey(keyValue, thisBlock), MapOperation.getByIndexRange(this.dataBinName, 0, MapReturnType.COUNT));
-							
+
 							if (mapCount == null) {
 								// This has potentially split
 								blocksInDoubt = true;
@@ -449,10 +483,10 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 							}
 						}
 					}
-					
+
 					blockList.clear();
 					if (blocksInDoubt) {
-						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split 
+						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split
 						// between the time we read the original bitmap and when we read this record)
 						Record rootRecord = client.get(null, getCombinedKey(keyValue, 0), BLOCK_MAP_BIN);
 						if (rootRecord != null) {
@@ -475,21 +509,21 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 					count += thisCount;
 				}
 	 			return count;
-				
+
 			}
 		}
 		return 0;
 	}
-	
+
 	/**
 	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
-	 * order as the input recordKeyValues. 
+	 * order as the input recordKeyValues.
 	 */
-	//@Override
+	@Override
 	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, ObjectMapper<T> mapper) {
 		return this.getAll(batchPolicy, recordKeyValues, 0, mapper);
 	}
-	
+
 	private class BatchData {
 		private long key;
 		private int batchIndex;
@@ -530,12 +564,12 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			return ((int)this.key) ^ batchIndex;
 		}
 	}
-	
+
 	/**
 	 * Get all of the records associated with all of the keys passed in. The returned records will be in the same
-	 * order as the input recordKeyValues. 
+	 * order as the input recordKeyValues.
 	 */
-	//@Override
+	@Override
 	@SuppressWarnings({ "unchecked" })
 	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords, ObjectMapper<T> mapper) {
 		final int count = recordKeyValues.length;
@@ -543,7 +577,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		if (maxRecords <= 0) {
 			maxRecords = Long.MAX_VALUE;
 		}
-		
+
 		Key[] rootKeys = new Key[count];
 		for (int i = 0; i < count; i++) {
 			rootKeys[i] = getCombinedKey(recordKeyValues[i], 0);
@@ -573,7 +607,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				}
 			}
 		}
-		
+
 		while (true) {
 			// Guestimate how many records we need.
 			long recordEstimate = 0;
@@ -599,7 +633,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 					break;
 				}
 			}
-			
+
 			if (dataToLoad.size() == 0) {
 				break;
 			}
@@ -626,7 +660,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				dataToLoad = newDataToLoad;
 			}
 		}
-		
+
 		// Should have all the data we need
 		final List<T>[] results = new ArrayList[count];
 		int recordCount = 0;
@@ -654,6 +688,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * Get all the records which match the passed operations. The operations are able to do things like "getByValueRange", etc. Each operation
 	 * will be applied to all the records which match, and the records returned.
 	 */
+	@Override
 	public Set<Record> getAll(WritePolicy opPolicy, String keyValue, Operation ... operations) {
 	/*
 		Key rootKey = new Key(namespace, setName, keyValue);
@@ -664,14 +699,14 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 		allOps[numOperations] = Operation.get(BLOCK_MAP_BIN);
 		allOps[numOperations+1] = Operation.get(LOCK_BIN);
-		
+
 		Set<Record> records = new HashSet<>();
 		Record result = client.operate(opPolicy, rootKey, allOps);
 
 		if (result != null) {
 			byte[] bitmap = (byte[]) result.getValue(BLOCK_MAP_BIN);
 			if (bitwiseOperations.getBit(bitmap, 0)) {
-				
+
 				// This block has been split, the results are in the sub-blocks
 				List<Integer> blockList = new ArrayList<>();
 				computeBlocks(bitmap, 0, blockList);
@@ -693,7 +728,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 					});
 					blockList.clear();
 					if (blocksInDoubt.size() > 0) {
-						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split 
+						// Re-read the root record to determine what's happened. This should be very rare: (a block TTLd out, or a block split
 						// between the time we read the original bitmap and when we read this record)
 						Key key = new Key(namespace, setName, keyValue);
 						Record rootRecord = client.get(opPolicy, key, BLOCK_MAP_BIN);
@@ -717,7 +752,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 						}
 					}
 				}
-				
+
 			}
 			else {
 				// This block exists and has not been split, therefore it contains the results.
@@ -726,7 +761,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 		return records;
 		*/
-		return null;
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
 	}
 
 	/**
@@ -734,12 +769,13 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * <p>
 	 * Note that deleting records from an underlying map will never cause 2 sub-blocks to merge back together. Hence
 	 * removing a large number of records might result in a map with a lot of totally empty sub-blocks.
-	 * 
+	 *
 	 * @param recordKeyValue
 	 * @param mapKey
 	 * @param operation
 	 * @return
 	 */
+	@Override
 	@SuppressWarnings("unchecked")
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, long mapKey) {
 		String id = getLockId();
@@ -761,7 +797,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		catch (AerospikeException ae) {
 			if (ae.getResultCode() == ResultCode.ELEMENT_EXISTS) {
 				while (true) {
-					// Since we're removing an element, this can never cause the root block to split. 
+					// Since we're removing an element, this can never cause the root block to split.
 					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, mapKey, MAX_LOCK_TIME);
 					if (record == null) {
 						// The lock vanished from under us, maybe it TTLd out, just try again.
@@ -771,7 +807,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 						// Check to see which block we should read
 						List<Entry<Long, Long>> mapEntries = (List<Entry<Long, Long>>) record.getList(BLOCK_MAP_BIN);
 						long block = computeBlockNumber(mapKey, mapEntries);
-			
+
 						try {
 							WritePolicy writePolicy2 = writePolicy == null ? new WritePolicy() : new WritePolicy(writePolicy);
 							writePolicy2.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
@@ -786,7 +822,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 								case ResultCode.ELEMENT_EXISTS:
 								case ResultCode.KEY_NOT_FOUND_ERROR:
 									// Either: The block is locked and in the process of splitting (ELEMENT_EXISTS) or
-									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
+									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we
 									// must re-read the root record and re-attempt the operation.
 									try {
 										Thread.sleep(2);
@@ -805,7 +841,19 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			}
 		}
 	}
-	
+	@Override
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, int mapKey) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, String mapKey) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public Object delete(WritePolicy writePolicy, String recordKeyValue, byte[] digest) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+
 
 	/**
 	 * Execute a UDF on an adaptive map for a select element. Extreme care must be taken when using this function -- the UDF should be allowed to
@@ -820,7 +868,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * The UDF will be called exactly once if the element is found in the adaptive map with the record containing the block which includes the mapKey.
 	 * If the adaptive map does not contain the element, the UDF will not be called at all.
 	 * <p/>
-	 * Note that no lock is obtained whilst the UDF is being called -- the atomic nature of UDFs in Aerospike will ensure atomicity. However, the 
+	 * Note that no lock is obtained whilst the UDF is being called -- the atomic nature of UDFs in Aerospike will ensure atomicity. However, the
 	 * explicit locks used by the adaptive map when splitting ARE observed.
 	 * <p/>
 	 * When the UDF is called, the first parameter will be the record (as always), the second parameter will be the key in the map which is desired,
@@ -834,6 +882,10 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * @param args
 	 * @return
 	 */
+	@Override
+	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value[] args) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
 	/*
 	@Override
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
@@ -858,7 +910,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		for (int i = 0; i < args.length; i++) {
 			values[i+2] = args[i];
 		}
-		
+
 		try {
 			return client.execute(writePolicy, key, packageName, functionName, values);
 		}
@@ -879,7 +931,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 							digest = hashFunction.getHash(mapKey);
 						}
 						int block = computeBlockNumber(digest, bitmap);
-			
+
 						try {
 							return client.execute(writePolicy, getCombinedKey(recordKeyValue, block), packageName, functionName, values);
 						}
@@ -888,7 +940,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 								case ResultCode.FILTERED_OUT:
 								case ResultCode.KEY_NOT_FOUND_ERROR:
 									// Either: The block is locked and in the process of splitting (FILTERED_OUT) or
-									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we 
+									// the record has split and been removed (KEY_NOT_FOUND_ERROR). In either case we
 									// must re-read the root record and re-attempt the operation.
 									try {
 										Thread.sleep(2);
@@ -908,15 +960,15 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 	}
 	*/
-	
+
 	private String getLockId() {
 		return ID + "-" + Thread.currentThread().getId();
 	}
-	
+
 	private String getUnlockPlaceholder() {
 		return ID + "-" + Long.MAX_VALUE;
 	}
-	
+
 	private Operation getObtainLockOperation(String id, long now) {
 		if (id == null) {
 			id = getLockId();
@@ -925,7 +977,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		MapPolicy policy = new MapPolicy(MapOrder.UNORDERED, MapWriteFlags.CREATE_ONLY);
 		return MapOperation.put(policy, LOCK_BIN, Value.get(LOCK_MAP_ENTRY), Value.get(data));
 	}
-	
+
 	private Operation getReleaseLockOperation(String id) {
 		if (id == null) {
 			id = getLockId();
@@ -936,7 +988,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 
 		return MapOperation.removeByValueRange(LOCK_BIN, Value.get(startData), Value.get(endData), MapReturnType.RANK);
 	}
-	
+
 	private Operation removeUnlockedTagOperation() {
 		return MapOperation.removeByKey(LOCK_BIN, Value.get(UNLOCK_MAP_ENTRY), MapReturnType.NONE);
 	}
@@ -946,13 +998,13 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		MapPolicy policy = new MapPolicy(MapOrder.UNORDERED, 0);
 		return MapOperation.put(policy, LOCK_BIN, Value.get(UNLOCK_MAP_ENTRY), Value.get(data));
 	}
-	
+
 
 	private enum LockType {
 		SUBDIVIDE_BLOCK (LOCK_BIN);
 //		ROOT_BLOCK_SPLIT_IN_PROGRESS (ROOT_BLOCK_LOCK);
-		
-		private String binName; 
+
+		private String binName;
 		private LockType(String binName) {
 			this.binName = binName;
 		}
@@ -960,7 +1012,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			return binName;
 		}
 	}
-	
+
 	private class LockAcquireException extends AerospikeException {
 		public LockAcquireException(Exception e) {
 			super(e);
@@ -972,13 +1024,13 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			super(e);
 		}
 	}
-	
+
 	private class RootBlockRemoved extends AerospikeException {
 		public RootBlockRemoved(String message) {
 			super(message);
 		}
 	}
-	
+
 	private void wait(int delayTime) {
 		try {
 			Thread.sleep(delayTime);
@@ -986,14 +1038,14 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			throw new AerospikeException(ResultCode.TIMEOUT, false);
 		}
 	}
-	
-	
+
+
 	/**
-	 * Wait for the root block to complete splitting. The root block, once locked, will never unlock. However, it only 
+	 * Wait for the root block to complete splitting. The root block, once locked, will never unlock. However, it only
 	 * gets locked when it's splitting, so it is expected that the first bit of the block map will be 1. If this is the
 	 * case, return. If the block is locked but the first bit of the block map is not 1, wait for it to become 1 or
 	 * the lock to expire.
-	 * 
+	 *
 	 * @param key
 	 * @param timeoutInMs
 	 * @return
@@ -1080,11 +1132,11 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 	}
 	/**
-	 * Wait for the root block to complete splitting. The root block, once locked, will never unlock. However, it only 
+	 * Wait for the root block to complete splitting. The root block, once locked, will never unlock. However, it only
 	 * gets locked when it's splitting, so it is expected that map of minInt -> blockNum will not be null. If this is the
 	 * case, return. If the block is locked but the block map is empty, wait for it to become populated or
 	 * the lock to expire. If the lock expires, assume the writing process has died, acquire the lock ourselves and perform the split.
-	 * 
+	 *
 	 * @param key
 	 * @param timeoutInMs
 	 * @return
@@ -1099,7 +1151,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				Record record = client.operate(null, key,
 						getRelevantBlocksOperation(mapKey),
 						Operation.get(lockType.getBinName()));
-				
+
 				if (record == null) {
 					return null;
 				}
@@ -1147,7 +1199,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 								writePolicy.generation = record.generation;
 								writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 								writePolicy.sendKey = this.sendKey;
-								
+
 								List<Object> data = new ArrayList<>();
 								data.add(id);
 								data.add(now + MAX_LOCK_TIME);
@@ -1223,7 +1275,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 						writePolicy.generation = record.generation;
 						writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 						writePolicy.sendKey = this.sendKey;
-						
+
 						Operation dataOperation = Operation.get(dataBinName);
 						Operation clearMapOperation = Operation.put(Bin.asNull(lockType.binName));
 						try {
@@ -1330,7 +1382,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 									writePolicy.generation = record.generation;
 									writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 									writePolicy.sendKey = this.sendKey;
-									
+
 									List<Object> data = new ArrayList<>();
 									data.add(id);
 									data.add(now + MAX_LOCK_TIME);
@@ -1363,23 +1415,23 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				}
 			}
 		}
-		
+
 	}
-	
-	/** 
-	 * Release the lock on this record, but only if we own it. 
+
+	/**
+	 * Release the lock on this record, but only if we own it.
 	 * <p>
-	 * Note that at the moment this is not needed because we only lock a block when it's splitting. The root block is never unlocked 
+	 * Note that at the moment this is not needed because we only lock a block when it's splitting. The root block is never unlocked
 	 * and the child blocks are removed instead of being unlocked (and the remove obviously removes the lock too)
-	 * 
-	 * @param recordKey - The key of the record on which the lock is to be released 
+	 *
+	 * @param recordKey - The key of the record on which the lock is to be released
 	 * @return -  true if this thread owned the lock and the lock was successfully released, false if this thread did not own the lock.
 	 */
 	@SuppressWarnings("unused")
 	private boolean releaseLock(LockType lockType, String recordKey, int blockNum) {
 		return releaseLock(lockType, getCombinedKey(recordKey, blockNum));
 	}
-	
+
 	private boolean releaseLock(LockType lockType, Key key) {
 		WritePolicy writePolicy = new WritePolicy();
 		writePolicy.maxRetries = 5;
@@ -1455,14 +1507,14 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 * @param dataValue - The value to insert into the map.
 	 * @param blockMap - The current block map. Can be <code>null</code>, which will force a database read.
 	 * @param blockMapGeneration - The generation of the block map. If this value is < 0 the blockMap parameter will be ignored and the value re-read from the database
-	 * @param data - The data of the record. If this is <code>null</code> it will be read from the database 
+	 * @param data - The data of the record. If this is <code>null</code> it will be read from the database
 	 * @param dataTTL - the TTL of this subblock. If the <code>data</code> parameter above is <code>null</code>, this will be read from the record along with the data
 	 * 					and the passed value ignored.
 	 * @return <code>true</code> if the operation was successful, <code>false</code> if the operation failed but could conceivably succeed on a retry, eg a race condition.
 	 */
 	@SuppressWarnings("unchecked")
 	private boolean splitBlockAndInsert(WritePolicy writePolicy, String recordKey, long blockNum, long mapKey, Object dataValue, List<Entry<Long, Long>> blockMap, int blockMapGeneration, TreeMap<Long, Object> data, int dataTTL) {
-		// We must have a valid block map, it may or may not have been provided. If the root block has not split, we will validly have a record with a positive generation and 
+		// We must have a valid block map, it may or may not have been provided. If the root block has not split, we will validly have a record with a positive generation and
 		// a null block map
 		if (blockMapGeneration < 0) {
 			Record record = client.operate(null, getCombinedKey(recordKey, 0), getRelevantBlocksOperation(mapKey));
@@ -1486,7 +1538,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				currentRecord = acquireLock(LockType.SUBDIVIDE_BLOCK, key, mapKey, MAX_LOCK_TIME, true);
 			}
 			catch (RecordDoesNotExistException rdnee) {
-				// The lock could not be obtained because the underlying record has been removed. THis could be because another 
+				// The lock could not be obtained because the underlying record has been removed. THis could be because another
 				// thread already split it. Retry the insert again
 				return false;
 			}
@@ -1495,7 +1547,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			if (isRootBlock && !areBlockListsEqual(blockMap, newBlockMap)) {
 				return false;
 			}
-			
+
 			data = (TreeMap<Long, Object>)currentRecord.getMap(dataBinName);
 			dataTTL = currentRecord.getTimeToLive();
 			if (blockNum == 0) {
@@ -1503,23 +1555,23 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 				blockMapGeneration = currentRecord.generation;
 			}
 		}
-		
+
 		// Add in the current record under consideration
 		data.put(mapKey, dataValue);
 
-		// Create the 2 halves of the map and populate them. 
+		// Create the 2 halves of the map and populate them.
 		int dataSize = data.size();
 		int splitIndex = dataSize / 2;
-		
+
 		// If we're the last block then we want to split it unevenly.
 		if (isLastBlock(mapKey, blockMap) && recordThreshold  >= 5 && dataSize > recordThreshold) {
 			splitIndex = recordThreshold - 2;
 		}
-		
+
 		List<List<Entry<Long, Object>>> dataHalves = new ArrayList<>();
 		dataHalves.add(new ArrayList<Entry<Long,Object>>(dataSize));
 		dataHalves.add(new ArrayList<Entry<Long,Object>>(dataSize));
-		
+
 		int counter = 0;
 		NavigableSet<Long> keySet = data.navigableKeySet();
 		for (Iterator<Long> keyIterator = keySet.iterator(); keyIterator.hasNext(); counter++) {
@@ -1527,9 +1579,9 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			Entry<Long, Object> entry = new AbstractMap.SimpleEntry<Long, Object>(thisKey, data.get(thisKey));
 			dataHalves.get(counter <= splitIndex ? 0 : 1).add(entry);
 		}
-	
+
 		// Now write the new records. In theory they should be CREATE_ONLY, but if we use this flag and another thread got part of the
-		// way through splitting this block and died, the records might exist and it would cause this process to fail. 
+		// way through splitting this block and died, the records might exist and it would cause this process to fail.
 		// Note that we must preserve the TTL of the current time.
 		if (writePolicy == null) {
 			writePolicy = new WritePolicy();
@@ -1540,12 +1592,12 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 
 		long firstHalfKey = generateUniqueNumber();
 		long secondHalfKey = generateUniqueNumber();
-		
-		client.operate(writePolicy, getCombinedKey(recordKey, firstHalfKey), 
+
+		client.operate(writePolicy, getCombinedKey(recordKey, firstHalfKey),
 				Operation.put(new Bin(dataBinName, dataHalves.get(0), MapOrder.KEY_ORDERED)), getUnlockedTagOperation());
 		client.operate(writePolicy, getCombinedKey(recordKey, secondHalfKey),
 				Operation.put(new Bin(dataBinName, dataHalves.get(1), MapOrder.KEY_ORDERED)), getUnlockedTagOperation());
-		
+
 		// The sub-records now exist, update the map and delete this record
 		long firstAddress = dataHalves.get(0).get(0).getKey();
 		long secondAddress = dataHalves.get(1).get(0).getKey();
@@ -1553,7 +1605,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			// this is the root block. The entry into the map for the first part should be Long.MIN_VALUE
 			firstAddress = Long.MIN_VALUE;
 		}
-		
+
 		updateRootBlockMap(recordKey, isRootBlock, firstAddress, firstHalfKey, secondAddress, secondHalfKey);
 		if (!isRootBlock) {
 			// This does not need to be done durably. If it comes back it will just TTL later
@@ -1564,26 +1616,26 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		}
 		return true;
 	}
-	
-	
+
+
 	private void updateRootBlockMap(String recordKey, boolean isRootBlock, long firstIndex, long firstBlock, long secondIndex, long secondBlock) {
 		WritePolicy writePolicy = new WritePolicy();
 		writePolicy.sendKey = this.sendKey;
-		
+
 		Key key = getCombinedKey(recordKey, 0);
-		
+
 		MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, 0);
 		if (isRootBlock) {
 			// The root block has split, remove the data from the root block. Do NOT release the lock as this is a flag to imply we've split.
 			// Also add in a new bin to identifiy this as the root of an adaptive map.
-			client.operate(writePolicy, key, 
+			client.operate(writePolicy, key,
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(firstIndex), Value.get(firstBlock)),
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(secondIndex), Value.get(secondBlock)),
 					Operation.put(new Bin(ROOT_INDICATOR, 2)),
 					Operation.put(Bin.asNull(dataBinName)));
 		}
 		else {
-			client.operate(writePolicy, key, 
+			client.operate(writePolicy, key,
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(firstIndex), Value.get(firstBlock)),
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(secondIndex), Value.get(secondBlock)));
 		}
@@ -1592,7 +1644,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	/**
 	 * This method is called when the root block has already split and we need to insert the record into a block which is not block zero.
 	 * <p/>
-	 * 
+	 *
 	 * @param recordKey - The primary key of the root record.
 	 * @param blockNum - The sub-block number to insert this into. Should be > 0
 	 * @param mapKey - The key to insert this into the map with
@@ -1605,7 +1657,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			writePolicy = new WritePolicy();
 		}
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
-		
+
 		// We want to insert into the map iff the record is not locked. Hence, we will write the lock with CREATE_ONLY, insert
 		// the record, then delete the lock. If the operation succeeds, we know the lock was not held during the write
 		// Note that as we never actually hold the lock, we don't care about the lock time value
@@ -1630,22 +1682,22 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 					// The block is locked. Wait for the lock to expire or be removed
 					waitForLockRelease(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
 					return false;
-					
+
 				case ResultCode.KEY_NOT_FOUND_ERROR:
-					// The record has split and been removed (KEY_NOT_FOUND_ERROR).  
+					// The record has split and been removed (KEY_NOT_FOUND_ERROR).
 					// Re-read the root record and re-attempt the operation.
 					return false;
-					
+
 				case ResultCode.RECORD_TOO_BIG:
 					// This record is too big, try to resplit it.
 					return splitBlockAndInsert(writePolicy, recordKey, blockNum, mapKey, value.getObject(), blockMap, blockMapGeneration);
-					
+
 				default:
 					throw ae;
 			}
 		}
 	}
-	
+
 	/**
 	 * Put a record to the adaptive map
 	 * @param recordKey - the key to the record to use
@@ -1654,18 +1706,18 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 	 */
 	@SuppressWarnings("unchecked")
 	public void put(WritePolicy writePolicy, String recordKey, long mapKey, Value value) {
-		
+
 		// We insert into the root record iff the Lock is not held. If the lock is held it means that this block
 		// has split and we must read further.
 		if (writePolicy == null) {
 			writePolicy = new WritePolicy();
 		}
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE;
-		
+
 		// We want to insert into the map iff the record is not locked. Hence, we will write the lock with CREATE_ONLY, insert
 		// the record, then delete the lock. If the operation succeeds, we know the lock was not held during the write
 		// Note that as we never actually hold the lock, we don't care about the lock time value
-		
+
 		// NB: Under Aerospike 4.7 or later we could use a predicate expression ontop of the operation to simplify this. (and remove the locking operations)
 		String id = getLockId();
 		Operation obtainLock = getObtainLockOperation(id, 0);
@@ -1709,7 +1761,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 						List<Entry<Long, Long>> blockMap = (List<Entry<Long, Long>>) record.getList(BLOCK_MAP_BIN);
 						if (blockMap != null) {
 							// The block has already split, we need to update the appropriate sub-block
-							
+
 							long blockToAddTo = computeBlockNumber(mapKey, blockMap);
 							if (putToSubBlock(writePolicy, recordKey, blockToAddTo, mapKey, value, blockMap, record.generation)) {
 								break;
@@ -1730,15 +1782,16 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			else {
 				throw ae;
 			}
-		}	
+		}
 	}
-	
+
+	@Override
 	@SuppressWarnings("unchecked")
 	public void deleteAll(WritePolicy writePolicy, String recordKeyValue) {
 		Key key = getCombinedKey(recordKeyValue, 0);
 		Record record = client.get(null, key);
 		if (record != null) {
-			
+
 			if (forceDurableDeletes) {
 				writePolicy.durableDelete = true;
 			}
@@ -1764,13 +1817,13 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		if (seed) {
 			client.truncate(null, "test", "testAdaptive", null);
 		}
-		AdaptiveMapUserSuppliedKey map = new AdaptiveMapUserSuppliedKey(client, "test", "testAdaptive", "map", new MapPolicy(MapOrder.KEY_ORDERED, 0), 100); 
+		AdaptiveMapUserSuppliedKey map = new AdaptiveMapUserSuppliedKey(client, "test", "testAdaptive", "map", new MapPolicy(MapOrder.KEY_ORDERED, 0), 100);
 
 		for (long i = 0; i < 200; i+=10) {
 			Value value = Value.get("Key-" + i);
 			map.put(null, "testKey", i, value);
 		}
-		
+
 		map.put(null,  "testKey", 161, Value.get("K-161"));
 		map.put(null,  "testKey", 167, Value.get("K-167"));
 		map.put(null,  "testKey", 162, Value.get("K-162"));
@@ -1786,7 +1839,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 		for (String key : data) {
 			System.out.println(key);
 		}
-		
+
 		WritePolicy writePolicy = new WritePolicy();
 		writePolicy.sendKey = true;
 		String[] keys = new String[30];
@@ -1796,7 +1849,7 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 //				for (int j = 0; j < 2+(i*30); j++) {
 				for (int j = 0; j < 200000; j++) {
 					Value value =Value.get("Data-"+i+"-"+j+"  123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
-					map.put(writePolicy, keys[i], (long)(100*i + j), value);
+					map.put(writePolicy, keys[i], 100*i + j, value);
 				}
 			}
 		}
@@ -1821,6 +1874,16 @@ public class AdaptiveMapUserSuppliedKey /*implements IAdaptiveMap */ {
 			System.out.printf("%d - %d\n", i, map.countAll(null, "test-"+i));
 		}
 		client.close();
-		
+
 	}
+
+	@Override
+	public Hash getHashFunction() {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+	@Override
+	public void setHashFuction(Hash hash) {
+		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+	}
+
 }
