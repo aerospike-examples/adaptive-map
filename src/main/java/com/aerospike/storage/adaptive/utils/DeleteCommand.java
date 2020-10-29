@@ -29,8 +29,8 @@ public class DeleteCommand extends Command {
 	protected void addSubCommandOptions(Options options) {
 		options.addRequiredOption("b", "bin", true, "Specifies the bin which contains the map data. (REQUIRED)");
 		options.addRequiredOption("k", "key", true, "Key to insert.");
-		options.addOption("c", "count", true, "Set the adaptive map count size for this insert. Default: 100");
-		options.addRequiredOption("d", "data", true, "Set the key and value for the insert. (REQUIRED)");
+		options.addOption("c", "count", true, "Set the adaptive map count size for this delete. Default: 100");
+		options.addRequiredOption("d", "data", true, "Set the key and value for the delete. (REQUIRED)");
 		this.options = options;
 	}
 	

@@ -3,7 +3,8 @@ package com.aerospike.storage.adaptive.utils;
 public enum CommandType {
 	COUNT("count", CountCommand.class),
 	INSERT("insert", InsertCommand.class),
-	DELETE("delete", DeleteCommand.class);
+	DELETE("delete", DeleteCommand.class),
+	PERFTEST("perfTest", PerformanceTest.class);
 	
 	private String name;
 	private Class<? extends Command> commandClazz;
