@@ -168,5 +168,5 @@ public interface IAdaptiveMap {
 	 * @return
 	 */
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest,
-			String packageName, String functionName, Value[] args);
+			String packageName, String functionName, Value ...args);
 }
