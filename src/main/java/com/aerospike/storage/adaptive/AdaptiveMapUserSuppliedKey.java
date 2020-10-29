@@ -194,7 +194,12 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 
 	@Override
 	public void put(WritePolicy writePolicy, String recordKey, Object mapKey, byte[] mapKeyDigest, Value value) {
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		if (mapKey instanceof Long || mapKey instanceof Integer || mapKey instanceof Short || mapKey instanceof Byte) {
+			put(writePolicy, recordKey, ((Number)mapKey).longValue(), value);
+		}
+		else {
+			throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		}
 	}
 
 	private static boolean forceDurableDeletes(IAerospikeClient client, String namespace) {

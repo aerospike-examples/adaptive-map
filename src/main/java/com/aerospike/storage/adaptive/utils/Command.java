@@ -20,7 +20,7 @@ public abstract class Command {
 	private String password;
 	private IAerospikeClient client;
 	
-	protected abstract void run(CommandType type, String[] argments);
+	protected abstract void run(CommandType type, String[] argments) throws Exception;
 	
 	protected void addSubCommandOptions(Options options) {}
 	protected void extractSubCommandOptions(CommandLine commandLine) {}
