@@ -137,7 +137,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	 * @param <T>
 	 */
 	public interface ObjectMapper<T> {
-		public T map(long key, Object object);
+		public T map(String recordKey, long mapKey, Object object);
 	}
 
 	/**
@@ -419,7 +419,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 					Record record = batchRecords.get(thisBlock);
 					TreeMap<Long, Object> map = (TreeMap<Long, Object>) record.getMap(dataBinName);
 					for (long key : map.keySet()) {
-						objectResults.add( mapper.map(key, map.get(key)));
+						objectResults.add( mapper.map(keyValue, key, map.get(key)));
 					}
 				}
 			}
@@ -427,7 +427,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 				// This block exists and has not been split, therefore it contains the results.
 				TreeMap<Long, Object> map = (TreeMap<Long, Object>) result.getMap(dataBinName);
 				for (long key : map.keySet()) {
-					objectResults.add( mapper.map(key, map.get(key)));
+					objectResults.add( mapper.map(keyValue, key, map.get(key)));
 				}
 			}
 			return objectResults;
@@ -678,7 +678,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 					if (results[index] == null) {
 						results[index] = new ArrayList<T>();
 					}
-					results[index].add(mapper.map(key, data.get(key)));
+					results[index].add(mapper.map(recordKeyValues[index], key, data.get(key)));
 					recordCount++;
 					if (recordCount >= maxRecords) {
 						return results;
@@ -1838,7 +1838,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		map.put(null,  "testKey", 165, Value.get("K-165"));
 
 		System.out.println("----------------");
-		List<String> data = map.getAll(null, "testKey", (key, recordData) -> {return key + ": " + recordData.toString();} );
+		List<String> data = map.getAll(null, "testKey", (recordKey, key, recordData) -> {return key + ": " + recordData.toString();} );
 		for (String key : data) {
 			System.out.println(key);
 		}
@@ -1859,7 +1859,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		for (int c = 0; c < 100; c++) {
 			int desiredCount = 10000;
 			long now = System.nanoTime();
-			List<String>[] resultData = map.getAll(null, keys, desiredCount, (key, recordData) -> {return key +": " + recordData.toString(); } );
+			List<String>[] resultData = map.getAll(null, keys, desiredCount, (recordKey, key, recordData) -> {return key +": " + recordData.toString(); } );
 			long time = System.nanoTime() - now;
 			System.out.printf("getting %d records took %,.3fms\n", desiredCount, time / 1000000.0);
 			if (c == 99) {
