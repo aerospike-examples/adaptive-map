@@ -703,7 +703,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			this.flag = flag;
 		}
 	}
-	
+
 	/**
 	 * Get all the records which match the passed operations. The operations are able to do things like "getByValueRange", etc. Each operation
 	 * will be applied to all the records which match, and the records returned.
@@ -749,7 +749,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 						blockMap = (Map<Long, Long>) result.getMap(BLOCK_MAP_BIN);
 					}
 				}
-				
+
 				// Now we're guaranteed to have a superset of the blocks in the map, form them into the appropriate result
 				for (long key : blockMap.values()) {
 					Record thisRecord = retrievedRecords.get(key);
@@ -1699,11 +1699,6 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 					throw ae;
 			}
 		}
-	}
-
-	@Override
-	public void put(WritePolicy writePolicy, String recordKey, Object mapKey, byte[] mapKeyDigest, Value value) {
-		this.put(writePolicy, recordKey, ((Number) mapKey).longValue(), value);
 	}
 
 	/**
