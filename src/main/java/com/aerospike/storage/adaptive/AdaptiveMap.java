@@ -765,7 +765,23 @@ public class AdaptiveMap implements IAdaptiveMap {
 	}
 	@Override
 	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, ObjectMapper<T> mapper) {
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		TreeMap<Object, Object>[] results = getAll(batchPolicy, recordKeyValues);
+		List<T>[] objectResults = new ArrayList[results.length];
+		for (int i=0; i<results.length; i++) {
+			objectResults[i] = new ArrayList<T>();
+			TreeMap<Object, Object> map = results[i];
+
+			if (map != null) {
+				for (Object key : map.keySet()) {
+					Object val = map.get(key);
+					if (val != null) {
+						objectResults[i].add( mapper.map(recordKeyValues[i], ((Long)key).longValue(), map.get(key)));
+					}
+				}
+			}
+		}
+
+		return objectResults;
 	}
 	@Override
 	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords, ObjectMapper<T> mapper) {
