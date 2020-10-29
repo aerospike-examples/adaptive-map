@@ -886,7 +886,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	 * @return
 	 */
 	@Override
-	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value[] args) {
+	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ... args) {
 		throw new java.lang.UnsupportedOperationException("Method not implemented.");
 	}
 	/*
