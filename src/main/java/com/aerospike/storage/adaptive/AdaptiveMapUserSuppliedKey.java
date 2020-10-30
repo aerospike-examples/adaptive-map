@@ -892,13 +892,13 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
 		if (mapKey instanceof Long || mapKey instanceof Integer || mapKey instanceof Short || mapKey instanceof Byte) {
 			long numericMapKey = ((Number)mapKey).longValue();
-			return executeUdfOnRecord(writePolicy, recordKeyValue, numericMapKey, digest, packageName, functionName, args); 
+			return executeUdfOnRecord(writePolicy, recordKeyValue, numericMapKey, digest, packageName, functionName, args);
 		}
 		else {
 			throw new java.lang.UnsupportedOperationException("Method not implemented.");
 		}
 	}
-	
+
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, long mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
 		if (writePolicy == null) {
 			writePolicy = new WritePolicy();
@@ -1819,13 +1819,29 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		}
 	}
 
+
+	/* I'm not liking this...  This started in the AmexPoCPart2 test code but got copied here and elsewhere.
+	 * Would be better in a library somewhere, but this is what we have for now...
+	 */
+	private static String getEnvString(String var, String dflt) {
+		String val = (System.getenv(var) == null) ? dflt : System.getenv(var);
+		System.out.printf("%s:%s # export %s=<str> to modifiy value\n",var,val,var);
+		return val;
+	}
+
+
 	public static void main(String[] args) {
+
 		boolean seed = true;
-		IAerospikeClient client = new AerospikeClient("127.0.0.1", 3000);
+		String host = getEnvString("AS_HOST", "127.0.0.1");
+		String namespace = "test";
+		String set = "testAdaptive";
+		String mapBin = "map";
+		IAerospikeClient client = new AerospikeClient(host, 3000);
 		if (seed) {
-			client.truncate(null, "test", "testAdaptive", null);
+			client.truncate(null, namespace, set, null);
 		}
-		AdaptiveMapUserSuppliedKey map = new AdaptiveMapUserSuppliedKey(client, "test", "testAdaptive", "map", new MapPolicy(MapOrder.KEY_ORDERED, 0), 100);
+		AdaptiveMapUserSuppliedKey map = new AdaptiveMapUserSuppliedKey(client, namespace, set, mapBin, new MapPolicy(MapOrder.KEY_ORDERED, 0), 100);
 
 		for (long i = 0; i < 200; i+=10) {
 			Value value = Value.get("Key-" + i);
