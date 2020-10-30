@@ -775,7 +775,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 				for (Object key : map.keySet()) {
 					Object val = map.get(key);
 					if (val != null) {
-						objectResults[i].add( mapper.map(recordKeyValues[i], ((Long)key).longValue(), map.get(key)));
+						objectResults[i].add( mapper.map(((Long)key).longValue(), map.get(key), i));
 					}
 				}
 			}
