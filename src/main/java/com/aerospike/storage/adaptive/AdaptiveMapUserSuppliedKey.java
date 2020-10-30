@@ -888,6 +888,16 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	 */
 	@Override
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
+		if (mapKey instanceof Long || mapKey instanceof Integer || mapKey instanceof Short || mapKey instanceof Byte) {
+			long numericMapKey = ((Number)mapKey).longValue();
+			return executeUdfOnRecord(writePolicy, recordKeyValue, numericMapKey, digest, packageName, functionName, args); 
+		}
+		else {
+			throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		}
+	}
+	
+	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, long mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
 		if (writePolicy == null) {
 			writePolicy = new WritePolicy();
 		}
@@ -917,23 +927,17 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			if (ae.getResultCode() == ResultCode.FILTERED_OUT) {
 				// This block must have split, find the sub-block and re-execute
 				while (true) {
-					long numericMapKey;
-					if (mapKey instanceof Long || mapKey instanceof Integer || mapKey instanceof Short || mapKey instanceof Byte) {
-						numericMapKey = ((Number)mapKey).longValue();
-					}
-					else {
-						throw new java.lang.UnsupportedOperationException("Method not implemented.");
-					}
 
-					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, numericMapKey, MAX_LOCK_TIME);
+					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, mapKey, MAX_LOCK_TIME);
 					if (record == null) {
 						// The lock vanished from under us, maybe it TTLd out, just try again.
 						continue;
 					}
 					else {
 						// Check to see which block we should read
+						@SuppressWarnings("unchecked")
 						List<Entry<Long, Long>> mapEntries = (List<Entry<Long, Long>>) record.getList(BLOCK_MAP_BIN);
-						long block = computeBlockNumber(numericMapKey, mapEntries);
+						long block = computeBlockNumber(mapKey, mapEntries);
 
 						try {
 							return client.execute(writePolicy, getCombinedKey(recordKeyValue, block), packageName, functionName, values);
