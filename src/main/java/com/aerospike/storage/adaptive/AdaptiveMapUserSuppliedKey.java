@@ -54,6 +54,7 @@ import com.aerospike.client.policy.GenerationPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.RecordExistsAction;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.client.query.PredExp;
 
 /**
  * This class is designed to overcome record size limits of traditional maps on Aerospike. Consider storing time-series
@@ -886,11 +887,6 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	 * @return
 	 */
 	@Override
-	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ... args) {
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
-	}
-	/*
-	@Override
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, Object mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
 		if (writePolicy == null) {
 			writePolicy = new WritePolicy();
@@ -921,19 +917,23 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			if (ae.getResultCode() == ResultCode.FILTERED_OUT) {
 				// This block must have split, find the sub-block and re-execute
 				while (true) {
-					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, MAX_LOCK_TIME);
+					long numericMapKey;
+					if (mapKey instanceof Long || mapKey instanceof Integer || mapKey instanceof Short || mapKey instanceof Byte) {
+						numericMapKey = ((Number)mapKey).longValue();
+					}
+					else {
+						throw new java.lang.UnsupportedOperationException("Method not implemented.");
+					}
+
+					Record record = waitForRootBlockToFullyLock(LockType.SUBDIVIDE_BLOCK, key, numericMapKey, MAX_LOCK_TIME);
 					if (record == null) {
 						// The lock vanished from under us, maybe it TTLd out, just try again.
 						continue;
 					}
 					else {
 						// Check to see which block we should read
-						byte[] bitmap = (byte[])record.getValue(BLOCK_MAP_BIN);
-						if (digest == null) {
-							// We must have a digest now
-							digest = hashFunction.getHash(mapKey);
-						}
-						int block = computeBlockNumber(digest, bitmap);
+						List<Entry<Long, Long>> mapEntries = (List<Entry<Long, Long>>) record.getList(BLOCK_MAP_BIN);
+						long block = computeBlockNumber(numericMapKey, mapEntries);
 
 						try {
 							return client.execute(writePolicy, getCombinedKey(recordKeyValue, block), packageName, functionName, values);
@@ -962,7 +962,6 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			}
 		}
 	}
-	*/
 
 	private String getLockId() {
 		return ID + "-" + Thread.currentThread().getId();
