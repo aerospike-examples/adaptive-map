@@ -1837,6 +1837,10 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		String namespace = "test";
 		String set = "testAdaptive";
 		String mapBin = "map";
+
+		final int KEYS = 30;
+		final int RECORDS = 200000;
+
 		IAerospikeClient client = new AerospikeClient(host, 3000);
 		if (seed) {
 			client.truncate(null, namespace, set, null);
@@ -1866,12 +1870,12 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 
 		WritePolicy writePolicy = new WritePolicy();
 		writePolicy.sendKey = true;
-		String[] keys = new String[30];
-		for (int i = 0; i < 30; i++) {
+		String[] keys = new String[KEYS];
+		for (int i = 0; i < KEYS; i++) {
 			keys[i] = "test-" + i;
 			if (seed) {
-//				for (int j = 0; j < 2+(i*30); j++) {
-				for (int j = 0; j < 200000; j++) {
+//				for (int j = 0; j < 2+(i*KEYS); j++) {
+				for (int j = 0; j < RECORDS; j++) {
 					Value value =Value.get("Data-"+i+"-"+j+"  123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890");
 					map.put(writePolicy, keys[i], 100*i + j, value);
 				}
@@ -1885,7 +1889,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			System.out.printf("getting %d records took %,.3fms\n", desiredCount, time / 1000000.0);
 			if (c == 99) {
 				int count = 0;
-				for (int i = 0; i < 30; i++) {
+				for (int i = 0; i < KEYS; i++) {
 					System.out.println(i + " -" + resultData[i]);
 					if (resultData[i] != null) {
 						count += resultData[i].size();
@@ -1894,7 +1898,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 				System.out.println(count);
 			}
 		}
-		for (int i = 0; i < 30; i++) {
+		for (int i = 0; i < KEYS; i++) {
 			System.out.printf("%d - %d\n", i, map.countAll(null, "test-"+i));
 		}
 		client.close();
