@@ -317,7 +317,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 
 		// Check to see if which block we should read
 		List<Entry<Long, Long>> minBlocks = (List<Entry<Long, Long>>) record.getValue(BLOCK_MAP_BIN);
-		if (minBlocks != null && minBlocks.size() == 0) {
+		if (minBlocks != null && minBlocks.size() > 0) {
 			long block = computeBlockNumber(mapKey, minBlocks);
 			record = client.operate(null, getCombinedKey(recordKeyValue, block),
 					MapOperation.getByKey(dataBinName, mapKeyValue, MapReturnType.VALUE));
@@ -332,7 +332,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 
 	@Override
 	public Object get(String recordKeyValue, int mapKey) {
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		return get(recordKeyValue, (long)mapKey);
 	}
 	@Override
 	public Object get(String recordKeyValue, String mapKey) {
