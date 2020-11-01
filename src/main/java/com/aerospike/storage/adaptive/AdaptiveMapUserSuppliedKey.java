@@ -1635,7 +1635,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, 0);
 		if (isRootBlock) {
 			// The root block has split, remove the data from the root block. Do NOT release the lock as this is a flag to imply we've split.
-			// Also add in a new bin to identifiy this as the root of an adaptive map.
+			// Also add in a new bin to identify this as the root of an adaptive map.
 			client.operate(writePolicy, key,
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(firstIndex), Value.get(firstBlock)),
 					MapOperation.put(mapPolicy, BLOCK_MAP_BIN, Value.get(secondIndex), Value.get(secondBlock)),

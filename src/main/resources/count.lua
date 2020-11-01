@@ -8,8 +8,17 @@ function countMapItems(stream, mapBinName)
 	end
 	
 	local function reduce_stats(a,b)
-	  return a+b
+		return a+b
+	end
+	
+	local function root_block_filter(rec) 
+		local val = rec.root_blk;
+		if val == nil or val < 2 then
+			return true;
+		else
+			return false
+		end
 	end
 
-	return stream : aggregate(0,aggregate_stats) : reduce(reduce_stats)
+	return stream : filter(root_block_filter) : aggregate(0,aggregate_stats) : reduce(reduce_stats)
 end

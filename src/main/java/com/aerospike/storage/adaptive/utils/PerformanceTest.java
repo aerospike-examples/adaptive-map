@@ -70,7 +70,7 @@ public class PerformanceTest extends Command {
 		this.binName = commandLine.getOptionValue("bin");
 		this.threads = Integer.valueOf(commandLine.getOptionValue("threads"));
 		this.blockSplitSize = Integer.valueOf(commandLine.getOptionValue("count", "100"));
-		this.type = MapType.getMapType(commandLine.getOptionValue("data"));
+		this.type = MapType.getMapType(commandLine.getOptionValue("type"));
 	}
 	
 	public String getKey(long id) {

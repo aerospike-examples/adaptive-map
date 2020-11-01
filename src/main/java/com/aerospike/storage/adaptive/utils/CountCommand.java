@@ -1,6 +1,7 @@
 package com.aerospike.storage.adaptive.utils;
 
 import java.io.File;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.commons.cli.CommandLine;
@@ -14,6 +15,8 @@ import com.aerospike.client.Record;
 import com.aerospike.client.ScanCallback;
 import com.aerospike.client.Value;
 import com.aerospike.client.cdt.MapOperation;
+import com.aerospike.client.cdt.MapOrder;
+import com.aerospike.client.cdt.MapPolicy;
 import com.aerospike.client.cdt.MapReturnType;
 import com.aerospike.client.lua.LuaConfig;
 import com.aerospike.client.policy.QueryPolicy;
@@ -22,7 +25,10 @@ import com.aerospike.client.query.ResultSet;
 import com.aerospike.client.query.Statement;
 import com.aerospike.client.task.RegisterTask;
 import com.aerospike.storage.adaptive.AdaptiveMap;
+import com.aerospike.storage.adaptive.AdaptiveMapUserSuppliedKey;
 import com.aerospike.storage.adaptive.BitwiseData;
+import com.aerospike.storage.adaptive.IAdaptiveMap;
+import com.aerospike.storage.adaptive.utils.PerformanceTest.MapType;
 
 /**
  * Count the number of records
@@ -57,7 +63,8 @@ public class CountCommand extends Command {
 	private boolean explain;
 	private boolean useUdf;
 	private boolean shouldRegisterUdf;
-	
+	private MapType type = MapType.NORMAL;
+
 	private boolean isNonLeafNode(BitwiseData data, int blockNum) {
 		return data.get(blockNum);
 	}
@@ -220,6 +227,12 @@ public class CountCommand extends Command {
 		}
 	}
 	
+	/**
+	 * Draw the splits for a normal adaptive map
+	 * @param client
+	 * @param key
+	 * @param mapBin
+	 */
 	private void drawSplits(IAerospikeClient client, Key key, String mapBin) {
 		Record record = client.get(null, key);
 		if (record != null) {
@@ -230,6 +243,30 @@ public class CountCommand extends Command {
 			int longestBlockLen = Integer.toString(highestBlock).length()+2;
 			for (int i = 0; i <= maxSplits; i++) {
 				drawSplitsForLevel(key, bitwiseData, i, maxSplits, longestBlockLen);
+			}
+		}
+	}
+
+	/**
+	 * Draw the counts for a time-sorted adaptive map
+	 * @param client
+	 * @param key
+	 * @param mapBin
+	 */
+	private void drawCounts(IAerospikeClient client, Key key, String mapBin) {
+		Record record = client.get(null, key);
+		if (record != null) {
+			@SuppressWarnings("unchecked")
+			Map<Long, Long> data = (Map<Long, Long>) record.getMap("blks");
+			for (long subMapStartKey : data.keySet()) {
+				long subMapRecordKey = data.get(subMapStartKey);
+				record = getAerospikeClient().operate(null, new Key(key.namespace, key.setName, key.userKey + ":" + subMapRecordKey), MapOperation.getByIndexRange(binName, 0, MapReturnType.COUNT));
+				if (record != null) {
+					System.out.printf("%d -> %d: %d\n",	subMapStartKey, subMapRecordKey, record.getLong(binName));
+				}
+				else {
+					System.out.printf("%d -> %d: null\n",	subMapStartKey, subMapRecordKey);
+				}
 			}
 		}
 	}
@@ -262,6 +299,7 @@ public class CountCommand extends Command {
 		options.addOption("e", "explain", false, "Explain the splits and counts for a single key record. Ignored if --key is not specified.");
 		options.addOption("u", "udf", false, "Use a UDF to count the records instead of a client-side scan. Ignored if --key is specified.");
 		options.addOption("r", "register", false, "Register the counting UDF. If not specified, assumes the UDF has already been registered. Ignored if --udf is not specified.");
+		options.addOption("T", "type", true, "Specify the map type (TimeSorted or Normal). Default: Normal");
 	}
 	
 	@Override
@@ -271,18 +309,32 @@ public class CountCommand extends Command {
 		this.explain = commandLine.hasOption("explain");
 		this.useUdf = commandLine.hasOption("udf");
 		this.shouldRegisterUdf = commandLine.hasOption("register");
+		this.type = MapType.getMapType(commandLine.getOptionValue("type"));
 	}
 	
 	@Override
-	protected void run(CommandType type, String[] argments) {
-		super.parseCommandLine(type.getName(), argments);
+	protected void run(CommandType commandType, String[] argments) {
+		super.parseCommandLine(commandType.getName(), argments);
 		IAerospikeClient client = super.connect();
 		
-		AdaptiveMap map = new AdaptiveMap(client, getNamespace(), getSetName(), binName, null, false, 1000, false);
+		IAdaptiveMap map;
+		MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, 0);
+		if (type == MapType.TIME_SORTED) {
+			map = new AdaptiveMapUserSuppliedKey(client, getNamespace(), getSetName(), binName, mapPolicy, 1000);
+		}
+		else {
+			map = new AdaptiveMap(client, getNamespace(), getSetName(), binName, null, false, 1000, false);
+		}
+
 		if (key != null) {
 			System.out.printf("key %s has %d members\n", key, map.countAll(null, key));
 			if (explain) {
-				drawSplits(client, new Key(getNamespace(), getSetName(), key), binName);
+				if (type == MapType.NORMAL) {
+					drawSplits(client, new Key(getNamespace(), getSetName(), key), binName);
+				}
+				else {
+					drawCounts(client, new Key(getNamespace(), getSetName(), key), binName);
+				}
 			}
 		}
 		else {

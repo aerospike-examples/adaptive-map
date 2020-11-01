@@ -8,7 +8,12 @@ import org.json.simple.parser.ParseException;
 
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Value;
+import com.aerospike.client.cdt.MapOrder;
+import com.aerospike.client.cdt.MapPolicy;
 import com.aerospike.storage.adaptive.AdaptiveMap;
+import com.aerospike.storage.adaptive.AdaptiveMapUserSuppliedKey;
+import com.aerospike.storage.adaptive.IAdaptiveMap;
+import com.aerospike.storage.adaptive.utils.PerformanceTest.MapType;
 
 /**
  * Insert an item into an adaptive map. For example:
@@ -26,6 +31,7 @@ public class InsertCommand extends Command {
 	private int count;
 	private String data;
 	private Options options;
+	private MapType type = MapType.NORMAL;
 	
 	@Override
 	protected void addSubCommandOptions(Options options) {
@@ -33,6 +39,7 @@ public class InsertCommand extends Command {
 		options.addRequiredOption("k", "key", true, "Key to insert.");
 		options.addOption("c", "count", true, "Set the adaptive map count size for this insert. Default: 100");
 		options.addRequiredOption("d", "data", true, "Set the key and value for the insert. (REQUIRED)");
+		options.addOption("T", "type", true, "Specify the map type (TimeSorted or Normal). Default: Normal");
 		this.options = options;
 	}
 	
@@ -42,19 +49,27 @@ public class InsertCommand extends Command {
 		this.key = commandLine.getOptionValue("key");
 		this.count = Integer.valueOf(commandLine.getOptionValue("count", "100"));
 		this.data = commandLine.getOptionValue("data");
+		this.type = MapType.getMapType(commandLine.getOptionValue("type"));
 	}
 	
 	@Override
-	protected void run(CommandType type, String[] argments) {
-		super.parseCommandLine(type.getName(), argments);
+	protected void run(CommandType commandType, String[] argments) {
+		super.parseCommandLine(commandType.getName(), argments);
 		IAerospikeClient client = super.connect();
-		AdaptiveMap map = new AdaptiveMap(client, getNamespace(), getSetName(), binName, null, false, count);
+		IAdaptiveMap map;
+		MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, 0);
+		if (type == MapType.TIME_SORTED) {
+			map = new AdaptiveMapUserSuppliedKey(client, getNamespace(), getSetName(), binName, mapPolicy, count);
+		}
+		else {
+			map = new AdaptiveMap(client, getNamespace(), getSetName(), binName, null, false, count);
+		}
 
 		// Parse the data
 		try {
 			JSONObject jsonData = (JSONObject) new JSONParser().parse(data);
 			Object keyData = jsonData.get("key");
-			Object valueData = jsonData.get("value");
+			Object valueData = jsonData.get("data");
 			if (keyData == null || valueData == null) {
 				System.out.println("Both key and data must be specified in the JSON");
 				usage(CommandType.INSERT.getName(), options);
