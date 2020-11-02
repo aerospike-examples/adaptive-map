@@ -849,7 +849,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	}
 	@Override
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, int mapKey) {
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		return delete(writePolicy, recordKeyValue, (long)mapKey);
 	}
 	@Override
 	public Object delete(WritePolicy writePolicy, String recordKeyValue, String mapKey) {
@@ -1397,11 +1397,11 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 									MapPolicy forcePolicy = new MapPolicy(MapOrder.UNORDERED, MapWriteFlags.DEFAULT);
 									try {
 										if (dataOperation != null) {
-											record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), Operation.get(BLOCK_MAP_BIN), dataOperation);
+											record = client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), getRelevantBlocksOperation(mapKey), dataOperation);
 											return record;
 										}
 										else {
-											client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), Operation.get(BLOCK_MAP_BIN));
+											client.operate(writePolicy, key, MapOperation.put(forcePolicy, lockType.getBinName(), Value.get(LOCK_MAP_ENTRY), Value.get(data)), getRelevantBlocksOperation(mapKey));
 											return null;
 										}
 									}
