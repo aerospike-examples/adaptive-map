@@ -253,6 +253,29 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	}
 
 	/**
+	 * Given a key and the map entries determine if this is in the first block
+	 * @param mapKey
+	 * @param mapEntries
+	 * @return
+	 */
+	private boolean isInFirstBlock(long mapKey, List<Entry<Long, Long>> mapEntries) {
+		// The array will contain either 1,2 or 3 values. We want the largest value <= mapKey
+		// NOTE: For this to work all the time the lowest block must have a map entry of Long. MIN_VALUE
+		Entry<Long, Long> bestEntry = null;
+		for (Entry<Long, Long> entry : mapEntries) {
+			if (entry.getKey() == mapKey) {
+				// exact match, this is the one we want
+				return entry.getKey() == Long.MIN_VALUE;
+			}
+			else if (entry.getKey() < mapKey && (bestEntry == null || entry.getKey() > bestEntry.getKey())) {
+				bestEntry = entry;
+			}
+		}
+		return bestEntry.getKey() == Long.MIN_VALUE;
+	}
+
+
+	/**
 	 * Given a key and the map entries looked up from that key (IndexRelativeRange(-1, 3), determine if
 	 * this block is the last block or now.
 	 * @param mapKey
@@ -1551,9 +1574,11 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 				return false;
 			}
 			// It is possible that the block has been split by another thread since we determined we needed to split it. Only applies to root block
-			List<Entry<Long, Long>> newBlockMap = (List<Entry<Long, Long>>)currentRecord.getValue(BLOCK_MAP_BIN);
-			if (isRootBlock && !areBlockListsEqual(blockMap, newBlockMap)) {
-				return false;
+			if (isRootBlock) {
+				List<Entry<Long, Long>> newBlockMap = (List<Entry<Long, Long>>)currentRecord.getValue(BLOCK_MAP_BIN);
+				if (!areBlockListsEqual(blockMap, newBlockMap)) {
+					return false;
+				}
 			}
 
 			data = (TreeMap<Long, Object>)currentRecord.getMap(dataBinName);
@@ -1609,7 +1634,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		// The sub-records now exist, update the map and delete this record
 		long firstAddress = dataHalves.get(0).get(0).getKey();
 		long secondAddress = dataHalves.get(1).get(0).getKey();
-		if (isRootBlock) {
+		if (isRootBlock || isInFirstBlock(mapKey, blockMap)) {
 			// this is the root block. The entry into the map for the first part should be Long.MIN_VALUE
 			firstAddress = Long.MIN_VALUE;
 		}

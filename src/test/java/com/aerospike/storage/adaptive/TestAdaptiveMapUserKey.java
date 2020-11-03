@@ -357,7 +357,32 @@ public class TestAdaptiveMapUserKey {
 		System.out.printf("map.count returned: %s in %.1fms\n", mapCount, time/1000000.0);
 		assertEquals(COUNTER, mapCount);
 	}
+
+	@Test
+	public void testSplitFirstSubblock() {
+		System.out.printf("\n*** testSplitFirstSubblock ***\n");
+		// Clean up after previous runs
+		client.truncate(null, NAMESPACE, SET, null);
+
+		final int COUNTER = 10;
+		IAdaptiveMap map = new AdaptiveMapUserSuppliedKey(client, NAMESPACE, SET, MAP_BIN, new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT), COUNTER);
+		final String recordKeyStr = "key1";
+		String data = "1234567890abcdef";
+
+		long now = System.nanoTime();
+		for (int i = 100; i > 0; i--) {
+			map.put(null, recordKeyStr, i, null, Value.get(data));
+		}
+		long time = System.nanoTime() - now;
+		System.out.printf("Inserted %d records in %.1fms (%.1fms avg)\n", COUNTER, (time/1000000.0), (time/1000000.0)/COUNTER);
+		now = System.nanoTime();
+		int mapCount = map.countAll(null, recordKeyStr);
+		time = System.nanoTime() - now;
+		System.out.printf("map.count returned: %s in %.1fms\n", mapCount, time/1000000.0);
+		assertEquals(100, mapCount);
+	}
 	
+
 	@Test
 	public void testMultiRecordGet() {
 		System.out.printf("\n*** testMultiRecordGet ***\n");
