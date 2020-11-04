@@ -258,6 +258,9 @@ public class CountCommand extends Command {
 		if (record != null) {
 			@SuppressWarnings("unchecked")
 			Map<Long, Long> data = (Map<Long, Long>) record.getMap("blks");
+			if (data == null) {
+				System.out.printf("root: %d\n", record.getMap(binName).size());
+			}
 			for (long subMapStartKey : data.keySet()) {
 				long subMapRecordKey = data.get(subMapStartKey);
 				record = getAerospikeClient().operate(null, new Key(key.namespace, key.setName, key.userKey + ":" + subMapRecordKey), MapOperation.getByIndexRange(binName, 0, MapReturnType.COUNT));
