@@ -101,7 +101,7 @@ public interface IAdaptiveMap {
 	 * @param filterCount -- the maximum number of records to return. If 0 or negative, all results will be returned.
 	 * 			If results are filtered out, the returned records will be the first ones in the result set.
 	 */
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount);
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long filterCount);
 
 	/**
 	 * Get all of the records associated with the passed keyValue. The result will be a TreeMap (ordered map by key) which contains all the records in the adaptive map.

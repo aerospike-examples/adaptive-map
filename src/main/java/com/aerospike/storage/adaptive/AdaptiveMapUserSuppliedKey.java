@@ -472,7 +472,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		throw new java.lang.UnsupportedOperationException("Method not implemented.");
 	}
 	@Override
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount) {
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long filterCount) {
 		throw new java.lang.UnsupportedOperationException("Method not implemented.");
 	}
 
@@ -1864,7 +1864,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		String mapBin = "map";
 
 		final int KEYS = 30;
-		final int RECORDS = 200000;
+		final int RECORDS = 2000;
 
 		IAerospikeClient client = new AerospikeClient(host, 3000);
 		if (seed) {
@@ -1907,7 +1907,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			}
 		}
 		for (int c = 0; c < 100; c++) {
-			int desiredCount = 10000;
+			int desiredCount = 10050;
 			long now = System.nanoTime();
 			List<String>[] resultData = map.getAll(null, keys, desiredCount, (key, recordData, i) -> {return key +": " + recordData.toString(); } );
 			long time = System.nanoTime() - now;

@@ -785,7 +785,23 @@ public class AdaptiveMap implements IAdaptiveMap {
 	}
 	@Override
 	public <T> List<T>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long maxRecords, ObjectMapper<T> mapper) {
-		throw new java.lang.UnsupportedOperationException("Method not implemented.");
+		TreeMap<Object, Object>[] results = getAll(batchPolicy, recordKeyValues, maxRecords);
+		List<T>[] objectResults = new ArrayList[results.length];
+		for (int i=0; i<results.length; i++) {
+			objectResults[i] = new ArrayList<T>();
+			TreeMap<Object, Object> map = results[i];
+
+			if (map != null) {
+				for (Object key : map.keySet()) {
+					Object val = map.get(key);
+					if (val != null) {
+						objectResults[i].add( mapper.map(((Long)key).longValue(), map.get(key), i));
+					}
+				}
+			}
+		}
+
+		return objectResults;
 	}
 
 	/**
@@ -1884,9 +1900,31 @@ public class AdaptiveMap implements IAdaptiveMap {
 	}
 
 	@Override
-	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, int filterCount) {
-		// TODO Auto-generated method stub
-		return null;
+	public TreeMap<Object, Object>[] getAll(BatchPolicy batchPolicy, String[] recordKeyValues, long filterCount) {
+		TreeMap<Object, Object>[] results = getAll(batchPolicy, recordKeyValues);
+
+		if (filterCount <= 0) {
+			return results;
+		}
+
+		// Truncate to filterCount items.
+		long count = 0;
+		for (TreeMap<Object, Object> batchResult : results) {
+			if (batchResult != null) {
+				long len = batchResult.size();
+				if ((count + len) > filterCount) {
+					if (filterCount <= count) {
+						batchResult.clear();
+					} else {
+						batchResult.keySet().removeAll(Arrays.asList(batchResult.keySet().toArray()).subList((int) (filterCount - count), (int) len));
+					}
+				}
+				len = batchResult.size();
+				count += len;
+			}
+		}
+		// TODO Actually limit by filterCount
+		return results;
 	}
 
 }
