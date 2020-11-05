@@ -628,7 +628,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 				if (blockMap != null && !blockMap.isEmpty()) {
 					// This block has split, we have the indexes
 					indexArrays[i] = blockMap;
-					for (long thisKey : blockMap.keySet()) {
+					for (long thisKey : blockMap.descendingKeySet()) {
 						batchData.add(new BatchData(i, blockMap.get(thisKey)));
 					}
 				}

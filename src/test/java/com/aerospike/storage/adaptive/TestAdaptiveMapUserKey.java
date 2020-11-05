@@ -441,7 +441,56 @@ public class TestAdaptiveMapUserKey {
 		assertTrue("Counts should be empty, but still contains " + counts, counts.isEmpty());
 		System.out.printf("Retreived %d days records with %d total entries in %.1fms\n", DAYS, totalCount, time / 1000000.0);
 	}
-	/*
+	
+	@Test
+	public void testByLimitSingleRecord() {
+		System.out.printf("\n*** testByLimitSingleRecord ***\n");
+		final int COUNTER = 10;
+		IAdaptiveMap map = new AdaptiveMapUserSuppliedKey(client, NAMESPACE, SET, MAP_BIN, new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT), COUNTER);
+		String recordKey = "testKey";
+		for (int i = 0; i < COUNTER; i++) {
+			map.put(null, recordKey, 10L * i, null, Value.get(10*i));
+		}
+		
+		// Get the 5 most recent, ie those with the biggest keys.
+		List<Long>[] values = map.getAll(null, new String[] {recordKey}, 5, (mapKey, value, block) -> {
+			return (Long)value;
+		});
+		assertEquals(5, values[0].size());
+		for (int i = 0; i < 5; i++) {
+			assertEquals(90L - 10*i, values[0].get(i).longValue());
+		}
+	}
+
+	@Test
+	public void testByLimitSplitRecord() {
+		System.out.printf("\n*** testByLimitSplitRecord ***\n");
+		final int COUNTER = 10;
+		IAdaptiveMap map = new AdaptiveMapUserSuppliedKey(client, NAMESPACE, SET, MAP_BIN, new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT), COUNTER);
+		String recordKey = "testKey";
+		for (int i = 0; i < 5*COUNTER; i++) {
+			map.put(null, recordKey, 10L * i, null, Value.get(10*i));
+		}
+		
+		// Get the 5 most recent, ie those with the biggest keys.
+		List<Long>[] values = map.getAll(null, new String[] {recordKey}, 5, (mapKey, value, block) -> {
+			return (Long)value;
+		});
+		assertEquals(5, values[0].size());
+		for (int i = 0; i < 5; i++) {
+			assertEquals((5*COUNTER-1)*10 - 10*i, values[0].get(i).longValue());
+		}
+		// Get the 5 most recent, ie those with the biggest keys.
+		values = map.getAll(null, new String[] {recordKey}, 2*COUNTER, (mapKey, value, block) -> {
+			return (Long)value;
+		});
+		assertEquals(2*COUNTER, values[0].size());
+		for (int i = 0; i < 2*COUNTER; i++) {
+			assertEquals((5*COUNTER-1)*10 - 10*i, values[0].get(i).longValue());
+		}
+
+	}
+/*
 	@Test
 	public void testCdt() {
 		final String recordKeyStr = "key1";
