@@ -792,7 +792,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 			TreeMap<Object, Object> map = results[i];
 
 			if (map != null) {
-				for (Object key : map.keySet()) {
+				for (Object key : map.descendingKeySet()) {
 					Object val = map.get(key);
 					if (val != null) {
 						objectResults[i].add( mapper.map(((Long)key).longValue(), map.get(key), i));
@@ -1916,7 +1916,7 @@ public class AdaptiveMap implements IAdaptiveMap {
 					if (filterCount <= count) {
 						batchResult.clear();
 					} else {
-						batchResult.keySet().removeAll(Arrays.asList(batchResult.keySet().toArray()).subList((int) (filterCount - count), (int) len));
+						batchResult.keySet().removeAll(Arrays.asList(batchResult.keySet().toArray()).subList(0, (int) (len + count - filterCount)));
 					}
 				}
 				len = batchResult.size();

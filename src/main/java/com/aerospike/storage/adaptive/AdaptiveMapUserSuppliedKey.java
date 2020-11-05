@@ -700,7 +700,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			int index = thisBatchData.batchIndex;
 			if (data != null) {
 				// This should always be the case.
-				for (long key : data.keySet()) {
+				for (long key : data.descendingKeySet()) {
 					if (results[index] == null) {
 						results[index] = new ArrayList<T>();
 					}
