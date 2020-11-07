@@ -159,9 +159,18 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	 * For strong consistency namespaces with strong-consistency-allow-expunges set to false, this flag should be true.
 	 */
 	public AdaptiveMapUserSuppliedKey(final IAerospikeClient client, final String namespace, final String setName, final String mapBin, final MapPolicy mapPolicy, int recordThreshold, boolean forceDurableDeletes) {
+		if (client == null) {
+			throw new IllegalArgumentException("client must be specified");
+		}
 		this.client = client;
-		this.setName = setName;
+		if (namespace == null || namespace.isEmpty()) {
+			throw new IllegalArgumentException("namespace must be specified");
+		}
 		this.namespace = namespace;
+		if (setName == null || setName.isEmpty()) {
+			throw new IllegalArgumentException("setName must be specified");
+		}
+		this.setName = setName;
 		this.mapPolicy = mapPolicy == null ? new MapPolicy(MapOrder.KEY_ORDERED, 0) : mapPolicy;
 		this.recordThreshold = recordThreshold;
 		if (mapBin == null || mapBin.isEmpty()) {
