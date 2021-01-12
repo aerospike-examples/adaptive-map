@@ -383,7 +383,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	@SuppressWarnings("unchecked")
 	public <T> List<T> getAll(Policy readPolicy, String keyValue, ObjectMapper<T> mapper) {
 		if (readPolicy == null) {
-			readPolicy = new Policy();
+			readPolicy = new Policy(client.getReadPolicyDefault());
 		}
 		Key rootKey = getCombinedKey(keyValue, 0);
 		Set<Record> records = new HashSet<>();
@@ -623,7 +623,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			rootKeys[i] = getCombinedKey(recordKeyValues[i], 0);
 		}
 		if (batchPolicy == null) {
-			batchPolicy = new BatchPolicy();
+			batchPolicy = new BatchPolicy(client.getBatchPolicyDefault());
 		}
 		batchPolicy.maxConcurrentThreads = 0;
 		Record[] batchResults = client.get(batchPolicy, rootKeys);
@@ -847,7 +847,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 						long block = computeBlockNumber(mapKey, mapEntries);
 
 						try {
-							WritePolicy writePolicy2 = writePolicy == null ? new WritePolicy() : new WritePolicy(writePolicy);
+							WritePolicy writePolicy2 = writePolicy == null ? new WritePolicy(client.getWritePolicyDefault()) : new WritePolicy(writePolicy);
 							writePolicy2.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 							record = client.operate(writePolicy2, getCombinedKey(recordKeyValue, block),
 									obtainLock,
@@ -933,7 +933,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 
 	public Object executeUdfOnRecord(WritePolicy writePolicy, String recordKeyValue, long mapKey, byte[] digest, String packageName, String functionName, Value ...args) {
 		if (writePolicy == null) {
-			writePolicy = new WritePolicy();
+			writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		}
 		// We must use an inbuilt predExp to see if the block is locked at the root level as this is not an operation
 		writePolicy.predExp = new PredExp[] {
@@ -1136,7 +1136,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 							}
 							else {
 								// The lock has expired. Try removing the lock with a gen check
-								WritePolicy writePolicy = new WritePolicy();
+								WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 								writePolicy.generation = record.generation;
 								writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 								writePolicy.sendKey = this.sendKey;
@@ -1200,7 +1200,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 				if (lockData == null || lockData.isEmpty()) {
 					// The block is not locked, acquire
 					Operation acquireLock = getObtainLockOperation(id, now);
-					WritePolicy wp = new WritePolicy();
+					WritePolicy wp = new WritePolicy(client.getWritePolicyDefault());
 					wp.generation = record.generation;
 					wp.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 					client.operate(wp, key, acquireLock);
@@ -1235,7 +1235,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 							}
 							else {
 								// The lock has expired. Try to force reacquiring the lock with a gen check
-								WritePolicy writePolicy = new WritePolicy();
+								WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 								writePolicy.generation = record.generation;
 								writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 								writePolicy.sendKey = this.sendKey;
@@ -1311,7 +1311,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 					}
 					else {
 						// The lock has expired. Try to force removing the lock with a gen check
-						WritePolicy writePolicy = new WritePolicy();
+						WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 						writePolicy.generation = record.generation;
 						writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 						writePolicy.sendKey = this.sendKey;
@@ -1363,7 +1363,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 				List<Object> data = new ArrayList<>();
 				data.add(id);
 				data.add(now + MAX_LOCK_TIME);
-				WritePolicy wp = new WritePolicy();
+				WritePolicy wp = new WritePolicy(client.getWritePolicyDefault());
 				wp.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 				wp.sendKey = this.sendKey;
 				if (dataOperation != null) {
@@ -1418,7 +1418,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 								}
 								else {
 									// The lock has expired. Try to force reacquiring the lock with a gen check
-									WritePolicy writePolicy = new WritePolicy();
+									WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 									writePolicy.generation = record.generation;
 									writePolicy.generationPolicy = GenerationPolicy.EXPECT_GEN_EQUAL;
 									writePolicy.sendKey = this.sendKey;
@@ -1473,7 +1473,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	}
 
 	private boolean releaseLock(LockType lockType, Key key) {
-		WritePolicy writePolicy = new WritePolicy();
+		WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		writePolicy.maxRetries = 5;
 		writePolicy.sleepBetweenRetries = 100;
 		Record record = client.operate(writePolicy, key, getReleaseLockOperation(null));
@@ -1626,7 +1626,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		// way through splitting this block and died, the records might exist and it would cause this process to fail.
 		// Note that we must preserve the TTL of the current time.
 		if (writePolicy == null) {
-			writePolicy = new WritePolicy();
+			writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		}
 		writePolicy.expiration = dataTTL;
 		writePolicy.sendKey = this.sendKey;
@@ -1661,7 +1661,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 
 
 	private void updateRootBlockMap(String recordKey, boolean isRootBlock, long firstIndex, long firstBlock, long secondIndex, long secondBlock) {
-		WritePolicy writePolicy = new WritePolicy();
+		WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		writePolicy.sendKey = this.sendKey;
 
 		Key key = getCombinedKey(recordKey, 0);
@@ -1696,7 +1696,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 	 */
 	private boolean putToSubBlock(WritePolicy writePolicy, String recordKey, long blockNum, long mapKey, Value value, List<Entry<Long, Long>> blockMap, int blockMapGeneration) {
 		if (writePolicy == null) {
-			writePolicy = new WritePolicy();
+			writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		}
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE_ONLY;
 
@@ -1752,7 +1752,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 		// We insert into the root record iff the Lock is not held. If the lock is held it means that this block
 		// has split and we must read further.
 		if (writePolicy == null) {
-			writePolicy = new WritePolicy();
+			writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		}
 		writePolicy.recordExistsAction = RecordExistsAction.UPDATE;
 
@@ -1902,7 +1902,7 @@ public class AdaptiveMapUserSuppliedKey implements IAdaptiveMap  {
 			System.out.println(key);
 		}
 
-		WritePolicy writePolicy = new WritePolicy();
+		WritePolicy writePolicy = new WritePolicy(client.getWritePolicyDefault());
 		writePolicy.sendKey = true;
 		String[] keys = new String[KEYS];
 		for (int i = 0; i < KEYS; i++) {

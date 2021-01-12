@@ -312,7 +312,7 @@ public class CountCommand extends Command {
 		this.explain = commandLine.hasOption("explain");
 		this.useUdf = commandLine.hasOption("udf");
 		this.shouldRegisterUdf = commandLine.hasOption("register");
-		this.type = MapType.getMapType(commandLine.getOptionValue("type"));
+		this.type = MapType.getMapType(commandLine.getOptionValue("type", "Normal"));
 	}
 	
 	@Override
