@@ -30,7 +30,7 @@
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
-			<version>4.4</version>
+			<version>4.13.1</version>
 		</dependency>
 		<!-- Commons CLI needed for command line parsing on utilities -->
 		<!-- https://mvnrepository.com/artifact/commons-cli/commons-cli -->
